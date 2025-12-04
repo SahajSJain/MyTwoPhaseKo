@@ -75,10 +75,8 @@ Droplet in a shear flow, grid size: 500 x 500:
 ## Building
 
 ```bash
-mkdir build
-cd build
-cmake ..
-make
+cd src
+make -j8 
 ```
 
 ## Usage
