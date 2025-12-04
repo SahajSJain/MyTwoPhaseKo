@@ -1,0 +1,4385 @@
+
+================================================================================
+File: ./CALCULATORS/absolute_value.cpp
+================================================================================
+
+// file: src/CALCULATORS/absolute_value.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+
+// max magnitude of a scalar field
+void CalculateAbsoluteValue(Field &phi, Field &abs_phi)
+{
+    const GridInfo* grid = phi.grid;
+    // Get grid dimensions using proper bounds
+    auto interior_policy = grid->interior_policy;
+    // Device view for safe capture
+    auto u = phi.u;
+    auto abs_u = abs_phi.u;
+
+    Kokkos::parallel_for("Absolute_Value", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        abs_u(i,j,k) = Kokkos::abs(u(i,j,k));
+    });
+    Kokkos::fence();
+}
+
+// max magnitude of a vector field
+void CalculateAbsoluteValue( Field &phi_x, 
+                             Field &phi_y, 
+                             Field &phi_z, 
+                             Field &abs_phi)
+{
+    const GridInfo* grid = phi_x.grid;
+    // Get grid dimensions using proper bounds
+    // Device view for safe capture
+    auto u = phi_x.u;
+    auto v = phi_y.u;
+    auto w = phi_z.u;
+    auto abs_u = abs_phi.u;
+    auto interior_policy = grid->interior_policy;
+    Kokkos::parallel_for("Absolute_Value",interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        #ifndef USE_2D
+        abs_u(i,j,k) = Kokkos::sqrt(u(i,j,k)*u(i,j,k) + 
+                                     v(i,j,k)*v(i,j,k) + 
+                                     w(i,j,k)*w(i,j,k));
+        #else
+        abs_u(i,j,k) = Kokkos::sqrt(u(i,j,k)*u(i,j,k) + 
+                                     v(i,j,k)*v(i,j,k));
+        #endif
+    });
+    Kokkos::fence();
+}
+
+================================================================================
+File: ./CALCULATORS/boundary_conditions.cpp
+================================================================================
+
+// file: src/CALCULATORS/boundary_conditions.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+
+void CalculateBoundaryValues(Field &phi, bctype BC)
+{
+    const GridInfo* grid = phi.grid;
+    // Get grid dimensions and create device-safe copies for lambda capture
+    int Nx = grid->config.Nx;
+    int Ny = grid->config.Ny;
+    int Nz = grid->config.Nz;
+    int Ngl = grid->config.Ngl;
+    
+    // Extract BC info for device-safe capture
+    int W_type = BC.W;
+    int E_type = BC.E;
+    int S_type = BC.S;
+    int N_type = BC.N;
+    int B_type = BC.B;
+    int F_type = BC.F;
+    real_t W_val = BC.W_val;
+    real_t E_val = BC.E_val;
+    real_t S_val = BC.S_val;
+    real_t N_val = BC.N_val;
+    real_t B_val = BC.B_val;
+    real_t F_val = BC.F_val;
+    
+    // Device view for safe capture
+    auto u = phi.u;
+    
+    // Compute proper loop bounds
+    auto xBoundary_policy = grid->xBoundary_policy;
+    auto yBoundary_policy = grid->yBoundary_policy;
+    auto zBoundary_policy = grid->zBoundary_policy;
+    // West Boundary (i = 0)
+    Kokkos::parallel_for("Boundary_Conditions_West",
+    xBoundary_policy,
+    KOKKOS_LAMBDA(const int j, const int k) {
+        // West Boundary
+        if (W_type == BC_DIRICHLET) {
+            u(0,j,k) = static_cast<real_t>(2.0)*W_val - u(1,j,k);
+        } 
+        else if (W_type == BC_NEUMANN) {
+            u(0,j,k) = u(1,j,k);
+        } 
+        else if (W_type == BC_PERIODIC) {
+            u(0,j,k) = u(Nx,j,k);
+        }
+        
+        // Fill ghost cells
+        for (int ig = 1; ig < Ngl; ig++) {
+            if(W_type == BC_DIRICHLET || W_type == BC_NEUMANN) {
+                u(-ig,j,k) = u(-(ig-1),j,k);
+            } else if (W_type == BC_PERIODIC) {
+                u(-ig,j,k) = u(Nx - ig,j,k);
+            }
+        }
+    });
+    Kokkos::fence();
+    
+    // East Boundary (i = Nx+1)
+    Kokkos::parallel_for("Boundary_Conditions_East",
+    xBoundary_policy,
+    KOKKOS_LAMBDA(const int j, const int k) {
+        // East Boundary
+        if (E_type == BC_DIRICHLET) {
+            u(Nx+1,j,k) = static_cast<real_t>(2.0)*E_val - u(Nx,j,k);
+        } 
+        else if (E_type == BC_NEUMANN) {
+            u(Nx+1,j,k) = u(Nx,j,k);
+        } 
+        else if (E_type == BC_PERIODIC) {
+            u(Nx+1,j,k) = u(1,j,k);
+        }
+        
+        // Fill ghost cells
+        for (int ig = 2; ig <= Ngl; ig++) {
+            if(E_type == BC_DIRICHLET || E_type == BC_NEUMANN) {
+                u(Nx+ig,j,k) = u(Nx+ig-1,j,k);
+            } else if (E_type == BC_PERIODIC) {
+                u(Nx+ig,j,k) = u(ig,j,k);
+            }
+        }
+    });
+    Kokkos::fence();
+    
+    // South Boundary (j = 0)
+    Kokkos::parallel_for("Boundary_Conditions_South",
+    yBoundary_policy,
+    KOKKOS_LAMBDA(const int i, const int k) {
+        // South Boundary
+        if (S_type == BC_DIRICHLET) {
+            u(i,0,k) = static_cast<real_t>(2.0)*S_val - u(i,1,k);
+        } 
+        else if (S_type == BC_NEUMANN) {
+            u(i,0,k) = u(i,1,k);
+        } 
+        else if (S_type == BC_PERIODIC) {
+            u(i,0,k) = u(i,Ny,k);
+        }
+        
+        // Fill ghost cells
+        for (int ig = 1; ig < Ngl; ig++) {
+            if(S_type == BC_DIRICHLET || S_type == BC_NEUMANN) {
+                u(i,-ig,k) = u(i,-(ig-1),k);
+            } else if (S_type == BC_PERIODIC) {
+                u(i,-ig,k) = u(i,Ny - ig,k);
+            }
+        }
+    });
+    Kokkos::fence();
+    
+    // North Boundary (j = Ny+1)
+    Kokkos::parallel_for("Boundary_Conditions_North",
+    yBoundary_policy,
+    KOKKOS_LAMBDA(const int i, const int k) {
+        // North Boundary
+        if (N_type == BC_DIRICHLET) {
+            u(i,Ny+1,k) = static_cast<real_t>(2.0)*N_val - u(i,Ny,k);
+        } 
+        else if (N_type == BC_NEUMANN) {
+            u(i,Ny+1,k) = u(i,Ny,k);
+        } 
+        else if (N_type == BC_PERIODIC) {
+            u(i,Ny+1,k) = u(i,1,k);
+        }
+        
+        // Fill ghost cells
+        for (int ig = 2; ig <= Ngl; ig++) {
+            if(N_type == BC_DIRICHLET || N_type == BC_NEUMANN) {
+                u(i,Ny+ig,k) = u(i,Ny+ig-1,k);
+            } else if (N_type == BC_PERIODIC) {
+                u(i,Ny+ig,k) = u(i,ig,k);
+            }
+        }
+    });
+    Kokkos::fence();
+    
+    #ifndef USE_2D
+    // Back Boundary (k = 0)
+    Kokkos::parallel_for("Boundary_Conditions_Back",
+    zBoundary_policy,
+    KOKKOS_LAMBDA(const int i, const int j) {
+        // Back Boundary
+        if (B_type == BC_DIRICHLET) {
+            u(i,j,0) = static_cast<real_t>(2.0)*B_val - u(i,j,1);
+        } 
+        else if (B_type == BC_NEUMANN) {
+            u(i,j,0) = u(i,j,1);
+        } 
+        else if (B_type == BC_PERIODIC) {
+            u(i,j,0) = u(i,j,Nz);
+        }
+        
+        // Fill ghost cells
+        for (int ig = 1; ig < Ngl; ig++) {
+            if(B_type == BC_DIRICHLET || B_type == BC_NEUMANN) {
+                u(i,j,-ig) = u(i,j,-(ig-1));
+            } else if (B_type == BC_PERIODIC) {
+                u(i,j,-ig) = u(i,j,Nz - ig);
+            }
+        }
+    });
+    Kokkos::fence();
+    
+    // Front Boundary (k = Nz+1)
+    Kokkos::parallel_for("Boundary_Conditions_Front",
+    zBoundary_policy,
+    KOKKOS_LAMBDA(const int i, const int j) {
+        // Front Boundary
+        if (F_type == BC_DIRICHLET) {
+            u(i,j,Nz+1) = static_cast<real_t>(2.0)*F_val - u(i,j,Nz);
+        } 
+        else if (F_type == BC_NEUMANN) {
+            u(i,j,Nz+1) = u(i,j,Nz);
+        } 
+        else if (F_type == BC_PERIODIC) {
+            u(i,j,Nz+1) = u(i,j,1);
+        }
+        
+        // Fill ghost cells
+        for (int ig = 2; ig <= Ngl; ig++) {
+            if(F_type == BC_DIRICHLET || F_type == BC_NEUMANN) {
+                u(i,j,Nz+ig) = u(i,j,Nz+ig-1);
+            } else if (F_type == BC_PERIODIC) {
+                u(i,j,Nz+ig) = u(i,j,ig);
+            }
+        }
+    });
+    Kokkos::fence();
+    #endif // USE_2D
+}
+
+================================================================================
+File: ./CALCULATORS/calculators.hpp
+================================================================================
+
+// file: src/CALCULATORS/calculators.hpp
+#ifndef CALCULATORS_HPP
+#define CALCULATORS_HPP
+
+// Header-only declarations for calculator routines implemented in
+// the source files under src/CALCULATORS. This header provides only
+// function declarations (no .cpp includes) so it is a proper .hpp file.
+
+// Include the project's master include (types, GridInfo, Field, Face, etc.)
+#include "../INCLUDE/include.hpp"
+
+// Function prototypes - match implementations in this directory
+
+// face_diff.cpp
+void CalculateFaceDiffs(Field& phi, Face& phi_f);
+
+// face_interpolate.cpp
+void CalculateFaceVals(Field& phi, Face& phi_f);
+void CalculateFaceVals(Field& phi_x,
+                       Field& phi_y,
+                       Field& phi_z,
+                       Face& phi_f);
+
+// gradient.cpp
+void CalculateGradients(Field& phi,
+                        Field& phi_x,
+                        Field& phi_y,
+                        Field& phi_z);
+
+// divergence.cpp
+void CalculateDivergence(Field& phi_x,
+                         Field& phi_y,
+                         Field& phi_z,
+                         Field& Div);
+void CalculateDivergence(Face& phi_f, Field& Div);
+
+// boundary_conditions.cpp
+// Note: signature matches implementation (passes bctype by value)
+void CalculateBoundaryValues(Field &phi, bctype BC );
+
+// convection.cpp
+void CalculateConvection(Face& phi_f,
+                         Face& U_f,
+                         Field& Conv);
+
+// diffusion.cpp
+void CalculateDiffusion(Face& phi_diff_f,
+                        Face& K_f,
+                        Field& Laplacian);
+
+// normals.cpp
+void CalculateNormals(Field& norm_x,
+                      Field& norm_y,
+                      Field& norm_z);
+
+// absolute_value.cpp
+void CalculateAbsoluteValue(Field &phi, Field &abs_phi);
+void CalculateAbsoluteValue(Field &phi_x,
+                            Field &phi_y,
+                            Field &phi_z,
+                            Field &abs_phi);
+
+// max_magnitude.cpp
+void CalculateMaxMagnitude(Field &phi, real_t &max_magnitude);
+
+// sharpening.cpp
+void CalculateSharpening(Face& psi_f,
+                         Face& norm_f,
+                         Face& epsilon_f,
+                         Field& Sharp);
+
+// SDF <-> Phase conversions
+void CalculateSDF2Phase(Field& psi,
+                        Field& epsilon,
+                        Field& phi);
+
+void CalculatePhaseToSdf(Field& phi,
+                         Field& epsilon,
+                         Field& psi);
+
+#endif // CALCULATORS_HPP
+
+
+================================================================================
+File: ./CALCULATORS/convection.cpp
+================================================================================
+
+// file: src/CALCULATORS/convection.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+// Should have phi and U at faces already 
+// This is done so that we can compute the needed stuff outside this subroutine
+// And can reuse those face values if needed readily. 
+void CalculateConvection( Face &phi_f, 
+                          Face &U_f,
+                          Field &Conv) 
+{
+    // calculate convection term: Conv = div( U_f * phi_f ) 
+    //    For x direction: Conv_x = ( U_f.E * phi_f.E - U_f.W * phi_f.W ) / dc_x(i) 
+    //                       Conv = Conv_x + Conv_y + Conv_z 
+    const GridInfo* grid = phi_f.grid;
+    // Get grid dimensions
+    auto interior_policy = grid->interior_policy;
+    auto xg = grid->xgrid->c;
+    auto yg = grid->ygrid->c;
+    auto zg = grid->zgrid->c;
+    auto delx = grid->xgrid->dc;
+    auto dely = grid->ygrid->dc;
+    auto delz = grid->zgrid->dc;
+    // Capture the device views!
+    auto conv_u = Conv.u;
+    auto U_f_E = U_f.E.u;
+    auto U_f_W = U_f.W.u;
+    auto U_f_N = U_f.N.u;
+    auto U_f_S = U_f.S.u;
+    #ifndef USE_2D
+    auto U_f_F = U_f.F.u;
+    auto U_f_B = U_f.B.u;
+    #endif
+    auto phi_f_E = phi_f.E.u;
+    auto phi_f_W = phi_f.W.u;
+    auto phi_f_N = phi_f.N.u;
+    auto phi_f_S = phi_f.S.u;
+    #ifndef USE_2D
+    auto phi_f_F = phi_f.F.u;
+    auto phi_f_B = phi_f.B.u;
+    #endif
+    // First compute (phi) at faces (phi_diff_f) 
+    // Interpolate to East and West faces (x-direction)
+
+    Kokkos::parallel_for("Convection_Field", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        // use captured views
+        real_t Conv_x = (U_f_E(i,j,k) * phi_f_E(i,j,k) - 
+                         U_f_W(i,j,k) * phi_f_W(i,j,k)) / delx(i); 
+        real_t Conv_y = (U_f_N(i,j,k) * phi_f_N(i,j,k) - 
+                         U_f_S(i,j,k) * phi_f_S(i,j,k)) / dely(j);
+        #ifndef USE_2D
+        real_t Conv_z = (U_f_F(i,j,k) * phi_f_F(i,j,k) - 
+                         U_f_B(i,j,k) * phi_f_B(i,j,k)) / delz(k);
+        conv_u(i,j,k) = Conv_x + Conv_y + Conv_z;
+        #else
+        conv_u(i,j,k) = Conv_x + Conv_y;
+        #endif 
+    });
+    Kokkos::fence();
+}
+
+
+
+================================================================================
+File: ./CALCULATORS/diffusion.cpp
+================================================================================
+
+// file: src/CALCULATORS/diffusion.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+// Solve diffusion term: Laplacian = div( K * grad(phi) )  
+// Should have grad(phi) and K at faces already
+// This is done so that we can compute the needed stuff outside this subroutine 
+// And can reuse those face values if needed readily.
+
+void CalculateDiffusion( Face &phi_diff_f,
+                         Face &K_f,
+                         Field &Laplacian) 
+{
+    // calculate diffusion term: Laplacian = div( K_diff * grad(phi) ) 
+    // In this mode we have already computed grad(phi) at faces (phi_diff_f) 
+    const GridInfo* grid = phi_diff_f.grid;
+    // Get grid dimensions
+    auto interior_policy = grid->interior_policy;
+    auto xg = grid->xgrid->c;
+    auto yg = grid->ygrid->c;
+    auto zg = grid->zgrid->c;
+    auto delx = grid->xgrid->dc;
+    auto dely = grid->ygrid->dc;
+    auto delz = grid->zgrid->dc;
+
+    // Store device views for capture
+    auto laplacian_u = Laplacian.u;
+    auto phi_diff_f_E = phi_diff_f.E.u;
+    auto phi_diff_f_W = phi_diff_f.W.u;
+    auto phi_diff_f_N = phi_diff_f.N.u;
+    auto phi_diff_f_S = phi_diff_f.S.u;
+    #ifndef USE_2D
+    auto phi_diff_f_F = phi_diff_f.F.u;
+    auto phi_diff_f_B = phi_diff_f.B.u;
+    #endif
+    auto K_f_E = K_f.E.u;
+    auto K_f_W = K_f.W.u;
+    auto K_f_N = K_f.N.u;
+    auto K_f_S = K_f.S.u;
+    #ifndef USE_2D
+    auto K_f_F = K_f.F.u;
+    auto K_f_B = K_f.B.u;
+    #endif
+    // Interpolate to East and West faces (x-direction)
+    Kokkos::parallel_for("Diffusion_Field", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        real_t Laplacian_x = (K_f_E(i,j,k) * phi_diff_f_E(i,j,k) - 
+                                K_f_W(i,j,k) * phi_diff_f_W(i,j,k)) / delx(i); 
+        real_t Laplacian_y = (K_f_N(i,j,k) * phi_diff_f_N(i,j,k) - 
+                                K_f_S(i,j,k) * phi_diff_f_S(i,j,k)) / dely(j);
+        #ifndef USE_2D
+        real_t Laplacian_z = (K_f_F(i,j,k) * phi_diff_f_F(i,j,k) - 
+                                K_f_B(i,j,k) * phi_diff_f_B(i,j,k)) / delz(k);
+        laplacian_u(i,j,k) = Laplacian_x + Laplacian_y + Laplacian_z;
+        #else
+        laplacian_u(i,j,k) = Laplacian_x + Laplacian_y;
+        #endif
+    });
+    Kokkos::fence();
+}
+
+
+
+
+
+
+================================================================================
+File: ./CALCULATORS/divergence.cpp
+================================================================================
+
+// file: src/CALCULATORS/divergence.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+
+void CalculateDivergence( Field &phi_x, 
+                        Field &phi_y,
+                        Field &phi_z, 
+                        Field &Div) 
+{
+    // calculate divergence from a vector field (phi_x, phi_y, phi_z)  
+    // Same operation as gradient but summing up the three components 
+    const GridInfo* grid = phi_x.grid;
+    // Get grid dimensions using proper bounds
+    auto interior_policy = grid->interior_policy;
+    auto dxf = grid->xgrid->df;
+    auto dyf = grid->ygrid->df;
+    auto dzf = grid->zgrid->df;
+    // Store device views for capture
+    auto phi_x_u = phi_x.u;
+    auto phi_y_u = phi_y.u;
+    auto phi_z_u = phi_z.u;
+    auto div_u   = Div.u; 
+    // Gradient in x-direction
+    // Interpolate to East and West faces (x-direction)
+    Kokkos::parallel_for("Gradient_Field", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        real_t dxp = dxf(i+1); // c(i+1) - c(i)
+        real_t dxm = dxf(i);   // c(i)   - c(i-1) 
+        real_t dphi_x_dx = (phi_x_u(i+1,j,k)*dxm*dxm - phi_x_u(i-1,j,k)*dxp*dxp + 
+                            phi_x_u(i,j,k)*(dxp*dxp - dxm*dxm)) / (dxp*dxm*(dxp + dxm));
+        real_t dyp = dyf(j+1); // c(j+1) - c(j)
+        real_t dym = dyf(j);   // c(j)   - c(j-1)
+        real_t dphi_y_dy = (phi_y_u(i,j+1,k)*dym*dym - phi_y_u(i,j-1,k)*dyp*dyp + 
+                            phi_y_u(i,j,k)*(dyp*dyp - dym*dym)) / (dyp*dym*(dyp + dym));
+        #ifndef USE_2D
+        real_t dzp = dzf(k+1); // c(k+1) -
+        real_t dzm = dzf(k);   // c(k)   - c(k-1)
+        real_t dphi_z_dz = (phi_z_u(i,j,k+1)*dzm*dzm - phi_z_u(i,j,k-1)*dzp*dzp + 
+                            phi_z_u(i,j,k)*(dzp*dzp - dzm*dzm)) / (dzp*dzm*(dzp + dzm));
+        div_u(i,j,k) = dphi_x_dx + dphi_y_dy + dphi_z_dz;
+        #else 
+        div_u(i,j,k) = dphi_x_dx + dphi_y_dy;
+        #endif
+    });
+    Kokkos::fence();
+}
+
+void CalculateDivergence( Face &phi_f, 
+                        Field &Div) 
+{
+    // calculate divergence from face values (phi_f_e, phi_f_w .... )
+    // dphi_x/dx = (phi_f_e - phi_f_w)/dx etc. 
+    // where dx = dc_x(i) = f(i+1) - f(i);   
+    const GridInfo* grid = phi_f.grid;
+    // Get grid dimensions using proper bounds
+    auto interior_policy = grid->interior_policy;
+    auto dx  = grid->xgrid->dc;
+    auto dy  = grid->ygrid->dc;
+    auto dz  = grid->zgrid->dc; 
+    // Store device views for capture
+    auto div_u   = Div.u;
+    auto phi_f_E = phi_f.E.u;
+    auto phi_f_W = phi_f.W.u;
+    auto phi_f_N = phi_f.N.u;
+    auto phi_f_S = phi_f.S.u;
+    #ifndef USE_2D
+    auto phi_f_F = phi_f.F.u;
+    auto phi_f_B = phi_f.B.u; 
+    #endif
+    // Gradient in x-direction
+    // Interpolate to East and West faces (x-direction)
+    Kokkos::parallel_for("Gradient_Field", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        real_t dphi_x_dx = (phi_f_E(i,j,k) - phi_f_W(i,j,k)) / dx(i);
+        real_t dphi_y_dy = (phi_f_N(i,j,k) - phi_f_S(i,j,k)) / dy(j);
+        #ifndef USE_2D
+        real_t dphi_z_dz = (phi_f_F(i,j,k) - phi_f_B(i,j,k)) / dz(k);
+        div_u(i,j,k) = dphi_x_dx + dphi_y_dy + dphi_z_dz;
+        #else
+        div_u(i,j,k) = dphi_x_dx + dphi_y_dy;
+        #endif
+    });
+    Kokkos::fence();
+}
+
+
+================================================================================
+File: ./CALCULATORS/face_diff.cpp
+================================================================================
+
+// file: src/CALCULATORS/face_diff.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+
+void CalculateFaceDiffs( Field &phi, 
+                          Face &phi_f ) 
+{
+    const GridInfo* grid = phi.grid;
+    // Get grid dimensions
+    auto interior_policy = grid->interior_policy;
+    auto xg = grid->xgrid->c;
+    auto yg = grid->ygrid->c;
+    auto zg = grid->zgrid->c;
+    auto delx = grid->xgrid->df;
+    auto dely = grid->ygrid->df;
+    auto delz = grid->zgrid->df;
+    // Store device views for capture
+    auto phi_u = phi.u;
+    auto phi_f_E = phi_f.E.u;
+    auto phi_f_W = phi_f.W.u;
+    auto phi_f_N = phi_f.N.u;
+    auto phi_f_S = phi_f.S.u;
+    #ifndef USE_2D
+    auto phi_f_F = phi_f.F.u;
+    auto phi_f_B = phi_f.B.u;
+    #endif
+    // Interpolate to East and West faces (x-direction)
+    Kokkos::parallel_for("CD2_Face_Diff", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        //  phi_f.E.u(i,j,k) = (phi.u(i+1,j,k) - phi.u(i,j,k)) / (xg(i+1) - xg(i));
+        //  phi_f.W.u(i,j,k) = (phi.u(i,j,k) - phi.u(i-1,j,k)) / (xg(i) - xg(i-1));
+        //  note: we have : df(i) = c(i) - c(i-1); and xg == c 
+        //  therefore:
+        phi_f_E(i,j,k) = (phi_u(i+1,j,k) - phi_u(i,j,k)) / delx(i+1);
+        phi_f_W(i,j,k) = (phi_u(i,j,k) - phi_u(i-1,j,k)) / delx(i);
+
+        phi_f_N(i,j,k) = (phi_u(i,j+1,k) - phi_u(i,j,k)) / dely(j+1);
+        phi_f_S(i,j,k) = (phi_u(i,j,k) - phi_u(i,j-1,k)) / dely(j);
+        #ifndef USE_2D
+        phi_f_F(i,j,k) = (phi_u(i,j,k+1) - phi_u(i,j,k)) / delz(k+1);
+        phi_f_B(i,j,k) = (phi_u(i,j,k) - phi_u(i,j,k-1)) / delz(k);
+        #endif
+    });
+    Kokkos::fence();
+}
+
+
+
+
+================================================================================
+File: ./CALCULATORS/face_interpolate.cpp
+================================================================================
+
+// file: src/CALCULATORS/face_interpolate.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+// interpolate field values to faces using central differencing
+void CalculateFaceVals( Field &phi, 
+                          Face &phi_f ) 
+{
+    const GridInfo* grid = phi.grid;
+    // Get grid dimensions
+    auto interior_policy = grid->interior_policy;
+    auto inp_x = grid->xgrid->inp; 
+    auto inp_y = grid->ygrid->inp;
+    auto inp_z = grid->zgrid->inp;
+    // Store device views for capture
+    auto phi_u = phi.u;
+    auto phi_f_E = phi_f.E.u;
+    auto phi_f_W = phi_f.W.u;
+    auto phi_f_N = phi_f.N.u;
+    auto phi_f_S = phi_f.S.u;
+    #ifndef USE_2D
+    auto phi_f_F = phi_f.F.u;
+    auto phi_f_B = phi_f.B.u;
+    #endif
+    // Interpolate to East and West faces (x-direction)
+    Kokkos::parallel_for("CD2_Field_interpolate", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        // Interpolation factor: inp(i) = (f(i) - c(i-1)) / (c(i) - c(i-1))
+        // That means, for central difference, 
+        //   east face i+1/2 uses cell i and i+1 
+        //   then phi(i+1/2) = (f(i+1) - c(i)) / (c(i+1) - c(i)) * phi(i+1) + ...
+        //                     (c(i+1) - f(i+1)) / (c(i+1) - c(i)) * phi(i) 
+        //   i.e. phi(i+1/2) = inp(i+1) * phi(i+1) + (1 - inp(i+1)) * phi(i)
+        // similaryly for west face i-1/2 uses cell i-1 and i 
+        //   then phi(i-1/2) = inp(i) * phi(i) + (1 - inp(i)) * phi(i-1) 
+        phi_f_E(i,j,k) = inp_x(i+1) * phi_u(i+1,j,k) + (1 - inp_x(i+1)) * phi_u(i,j,k);
+        phi_f_W(i,j,k) = inp_x(i) * phi_u(i,j,k) + (1 - inp_x(i)) * phi_u(i-1,j,k);
+
+        phi_f_N(i,j,k) = inp_y(j+1) * phi_u(i,j+1,k) + (1 - inp_y(j+1)) * phi_u(i,j,k);
+        phi_f_S(i,j,k) = inp_y(j) * phi_u(i,j,k) + (1 - inp_y(j)) * phi_u(i,j-1,k);
+        // for debugging, use simple average instead of interpolation factors
+        // phi_f.E.u(i,j,k) = 0.5*(phi.u(i+1,j,k) + phi.u(i,j,k));
+        // phi_f.W.u(i,j,k) = 0.5*(phi.u(i,j,k) + phi.u(i-1,j,k));
+        // phi_f.N.u(i,j,k) = 0.5*(phi.u(i,j+1,k) + phi.u(i,j,k));
+        // phi_f.S.u(i,j,k) = 0.5*(phi.u(i,j,k) + phi.u(i,j-1,k));
+        #ifndef USE_2D
+        phi_f_F(i,j,k) = inp_z(k+1) * phi_u(i,j,k+1) + (1 - inp_z(k+1)) * phi_u(i,j,k);
+        phi_f_B(i,j,k) = inp_z(k) * phi_u(i,j,k) + (1 - inp_z(k)) * phi_u(i,j,k-1);
+        #endif
+    });
+    Kokkos::fence();
+}
+// interpolate vector field values to faces using central differencing 
+// phi_x -> East and West faces
+// phi_y -> North and South faces
+// phi_z -> Front and Back faces
+void CalculateFaceVals( Field &phi_x, 
+                            Field &phi_y,
+                            Field &phi_z,
+                            Face &phi_f ) 
+{
+    // Same as before but now we have a vector field (phi_x, phi_y, phi_z)
+    // phi_x -> East and West faces
+    // phi_y -> North and South faces
+    // phi_z -> Front and Back faces 
+    const GridInfo* grid = phi_x.grid;
+    // Get grid dimensions
+    auto interior_policy = grid->interior_policy;
+    auto inp_x = grid->xgrid->inp; 
+    auto inp_y = grid->ygrid->inp;
+    auto inp_z = grid->zgrid->inp;
+    // Store device views for capture
+    auto phi_f_E = phi_f.E.u;
+    auto phi_f_W = phi_f.W.u;
+    auto phi_f_N = phi_f.N.u;
+    auto phi_f_S = phi_f.S.u;
+    #ifndef USE_2D
+    auto phi_f_F = phi_f.F.u;
+    auto phi_f_B = phi_f.B.u;
+    #endif
+    auto phi_x_u = phi_x.u;
+    auto phi_y_u = phi_y.u;
+    auto phi_z_u = phi_z.u;
+
+    // Interpolate to East and West faces (x-direction)
+    Kokkos::parallel_for("CD2_Vector_interpolate", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        // Interpolation factor: inp(i) = (f(i) - c(i-1)) / (c(i) - c(i-1))
+        // That means, for central difference, 
+        //   east face i+1/2 uses cell i and i+1 
+        //   then phi(i+1/2) = (f(i+1) - c(i)) / (c(i+1) - c(i)) * phi(i+1) + ...
+        //                     (c(i+1) - f(i+1)) / (c(i+1) - c(i)) * phi(i) 
+        //   i.e. phi(i+1/2) = inp(i+1) * phi(i+1) + (1 - inp(i+1)) * phi(i)
+        // similaryly for west face i-1/2 uses cell i-1 and i 
+        //   then phi(i-1/2) = inp(i) * phi(i) + (1 - inp(i)) * phi(i-1) 
+        phi_f_E(i,j,k) = inp_x(i+1) * phi_x_u(i+1,j,k) + (1 - inp_x(i+1)) * phi_x_u(i,j,k);
+        phi_f_W(i,j,k) = inp_x(i) * phi_x_u(i,j,k) + (1 - inp_x(i)) * phi_x_u(i-1,j,k);
+
+        phi_f_N(i,j,k) = inp_y(j+1) * phi_y_u(i,j+1,k) + (1 - inp_y(j+1)) * phi_y_u(i,j,k);
+        phi_f_S(i,j,k) = inp_y(j) * phi_y_u(i,j,k) + (1 - inp_y(j)) * phi_y_u(i,j-1,k);
+        // phi_f.E.u(i,j,k) = 0.5*(phi_x.u(i+1,j,k) + phi_x.u(i,j,k));
+        // phi_f.W.u(i,j,k) = 0.5*(phi_x.u(i,j,k) + phi_x.u(i-1,j,k));
+        // phi_f.N.u(i,j,k) = 0.5*(phi_y.u(i,j+1,k) + phi_y.u(i,j,k));
+        // phi_f.S.u(i,j,k) = 0.5*(phi_y.u(i,j,k) + phi_y.u(i,j-1,k));
+        #ifndef USE_2D
+        // phi_f.F.u(i,j,k) = 0.5*(phi_z.u(i,j,k+1) + phi_z.u(i,j,k));
+        // phi_f.B.u(i,j,k) = 0.5*(phi_z.u(i,j,k) + phi_z.u(i,j,k-1));
+        phi_f_F(i,j,k) = inp_z(k+1) * phi_z_u(i,j,k+1) + (1 - inp_z(k+1)) * phi_z_u(i,j,k);
+        phi_f_B(i,j,k) = inp_z(k) * phi_z_u(i,j,k) + (1 - inp_z(k)) * phi_z_u(i,j,k-1);
+        #endif
+    });
+    Kokkos::fence();
+}
+
+
+
+================================================================================
+File: ./CALCULATORS/gradient.cpp
+================================================================================
+
+// file: src/CALCULATORS/gradient.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+#include <iostream>
+
+// calculate grad(phi) = (phi_x, phi_y, phi_z) 
+void CalculateGradients( Field &phi, 
+                         Field &phi_x, 
+                         Field &phi_y,
+                         Field &phi_z) 
+{
+    const GridInfo* grid = phi.grid;
+    auto interior_policy = grid->interior_policy;
+    auto dxf = grid->xgrid->df;
+    auto dyf = grid->ygrid->df;
+    auto dzf = grid->zgrid->df;
+    
+    // Capture the device views!
+    auto phi_u = phi.u;
+    auto phi_x_u = phi_x.u;
+    auto phi_y_u = phi_y.u;
+    auto phi_z_u = phi_z.u;
+    
+    Kokkos::parallel_for("Gradient_Field", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        real_t dxp = dxf(i+1);
+        real_t dxm = dxf(i);
+        phi_x_u(i,j,k) = (phi_u(i+1,j,k)*dxm*dxm - phi_u(i-1,j,k)*dxp*dxp + 
+                          phi_u(i,j,k)*(dxp*dxp - dxm*dxm)) / (dxp*dxm*(dxp + dxm));
+        
+        real_t dyp = dyf(j+1);
+        real_t dym = dyf(j);
+        phi_y_u(i,j,k) = (phi_u(i,j+1,k)*dym*dym - phi_u(i,j-1,k)*dyp*dyp + 
+                          phi_u(i,j,k)*(dyp*dyp - dym*dym)) / (dyp*dym*(dyp + dym));
+        
+        #ifndef USE_2D
+        real_t dzp = dzf(k+1);
+        real_t dzm = dzf(k);
+        phi_z_u(i,j,k) = (phi_u(i,j,k+1)*dzm*dzm - phi_u(i,j,k-1)*dzp*dzp + 
+                          phi_u(i,j,k)*(dzp*dzp - dzm*dzm)) / (dzp*dzm*(dzp + dzm));
+        #endif
+    });
+    Kokkos::fence();
+}
+
+
+================================================================================
+File: ./CALCULATORS/max_magnitude.cpp
+================================================================================
+
+// file: src/CALCULATORS/max_magnitude.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+
+// max magnitude of a scalar field
+void CalculateMaxMagnitude(Field &phi, real_t &max_magnitude)
+{
+    const GridInfo* grid = phi.grid;
+    // Get grid dimensions using proper bounds
+    auto interior_policy = grid->interior_policy;
+    // Device view for safe capture
+    auto u = phi.u;
+
+    // Create a Kokkos reduction to find the maximum magnitude
+    real_t local_max = 0.0;
+
+    Kokkos::parallel_reduce("Max_Magnitude",
+    interior_policy,
+    KOKKOS_LAMBDA(const int i, const int j, const int k, real_t& thread_max) {
+        real_t val = Kokkos::abs(u(i,j,k));
+        if (val > thread_max) {
+            thread_max = val;
+        }
+    }, 
+    Kokkos::Max<real_t>(local_max));
+
+    Kokkos::fence();
+
+    // Update the output maximum magnitude
+    max_magnitude = local_max;
+}
+
+================================================================================
+File: ./CALCULATORS/normals.cpp
+================================================================================
+
+// file: src/CALCULATORS/normals.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+// If we have a vector field psi = (psi_x, psi_y, psi_z) 
+// Normalize it to get unit normal vector field 
+void CalculateNormals(  Field &norm_x, 
+                        Field &norm_y,
+                        Field &norm_z) 
+{
+    const GridInfo* grid = norm_x.grid;
+    // Get grid dimensions using proper bounds
+    auto interior_policy = grid->interior_policy;
+    // Store device views for capture
+    auto norm_x_u = norm_x.u;
+    auto norm_y_u = norm_y.u;
+    auto norm_z_u = norm_z.u;
+    auto small_number = REAL_EPSILON;
+    Kokkos::parallel_for("Normalize_Gradient", 
+    interior_policy, 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        #ifdef USE_2D
+            real_t mag = Kokkos::sqrt( norm_x_u(i,j,k)*norm_x_u(i,j,k) + 
+                               norm_y_u(i,j,k)*norm_y_u(i,j,k) + small_number );
+        #else
+            real_t mag = Kokkos::sqrt( norm_x_u(i,j,k)*norm_x_u(i,j,k) + 
+                               norm_y_u(i,j,k)*norm_y_u(i,j,k) + 
+                               norm_z_u(i,j,k)*norm_z_u(i,j,k) + small_number );
+        #endif
+        norm_x_u(i,j,k) /= mag;
+        norm_y_u(i,j,k) /= mag;
+        #ifndef USE_2D
+        norm_z_u(i,j,k) /= mag;
+        #endif
+    });
+    Kokkos::fence();
+}
+
+
+================================================================================
+File: ./CALCULATORS/phase2sdf.cpp
+================================================================================
+
+// file: src/CALCULATORS/phase2sdf.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+
+void CalculatePhaseToSdf(
+    Field& phi,      // Phase field
+    Field& epsilon,  // Interface thickness
+    Field& psi              // Signed distance function (output)
+) {
+    auto grid = psi.grid;
+    auto phi_d = phi.u;
+    auto eps_d = epsilon.u;
+    auto psi_d = psi.u;
+    
+    auto FullPolicy = grid->full_policy; 
+    
+    const real_t small = REAL_EPSILON;
+    
+    Kokkos::parallel_for("PhaseToSdf",
+        FullPolicy,
+        KOKKOS_LAMBDA(const int i, const int j, const int k) {
+            real_t phi_val = phi_d(i, j, k);
+            real_t eps_val = eps_d(i, j, k);
+            
+            // Clamp phi to avoid numerical issues
+            phi_val = Kokkos::max(small, Kokkos::min(1.0 - small, phi_val));
+            // psi = epsilon * log((phi+small)/  (1 - phi + small))            
+            psi_d(i, j, k) = eps_val * 
+                        Kokkos::log((phi_val + small) / (1.0 - phi_val + small));
+        });
+    
+    Kokkos::fence();
+}
+
+================================================================================
+File: ./CALCULATORS/sdf2phase.cpp
+================================================================================
+
+// file: src/CALCULATORS/sdf2phase.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+
+void CalculateSDF2Phase( Field& psi,      // Signed distance function
+                        Field& epsilon,  // Interface thickness
+                        Field& phi              // Phase field (output)) 
+)
+{
+    auto grid = phi.grid;
+    auto psi_d = psi.u;
+    auto eps_d = epsilon.u;
+    auto phi_d = phi.u;
+    
+    auto FullPolicy = grid->full_policy;
+    
+    Kokkos::parallel_for("SdfToPhase",
+        FullPolicy,
+        KOKKOS_LAMBDA(const int i, const int j, const int k) {
+            real_t psi_val = psi_d(i, j, k);
+            real_t eps_val = eps_d(i, j, k);
+            
+            // phi = 0.5*(1 + tanh(psi/(2*epsilon)))
+            phi_d(i, j, k) = 0.5 * (1.0 + Kokkos::tanh(psi_val / (2.0 * eps_val)));
+        });
+    
+    Kokkos::fence();
+}
+
+================================================================================
+File: ./CALCULATORS/sharpening.cpp
+================================================================================
+
+// file: src/CALCULATORS/sharpening.cpp
+#include "../INCLUDE/include.hpp"
+#include "calculators.hpp"
+// Assume we have psi at faces (psi_f),
+// normals at faces (norm_f) and epsilon at faces (epsilon_f) 
+
+// Calculate sharpening term: Sharp = Div(Sharp_flux)
+// Where Sharp_flux = (1/4)*(1 - tanh^2(0.5*psi/epsilon))*norm_f 
+// Where norm_f is the unit normal vector at faces = grad(psi)/|grad(psi)| 
+void CalculateSharpening( Face &psi_f, 
+                          Face &norm_f,
+                          Face &epsilon_f,
+                          Field &Sharp)
+{
+    // calculate convection term: Conv = div( U_f * phi_f ) 
+    //    For x direction: Conv_x = ( U_f.E * phi_f.E - U_f.W * phi_f.W ) / dc_x(i) 
+    //                       Conv = Conv_x + Conv_y + Conv_z 
+    const GridInfo* grid = psi_f.grid;
+    // Get grid dimensions
+    auto Nx = grid->config.Nx;
+    auto Ny = grid->config.Ny; 
+    auto Nz = grid->config.Nz;
+    auto xg = grid->xgrid->c;
+    auto yg = grid->ygrid->c;
+    auto zg = grid->zgrid->c;
+    auto delx = grid->xgrid->dc;
+    auto dely = grid->ygrid->dc;
+    auto delz = grid->zgrid->dc;
+    // Capture the device views!
+    auto Sharp_u = Sharp.u;
+    auto epsilon_f_E = epsilon_f.E.u;
+    auto epsilon_f_W = epsilon_f.W.u;
+    auto epsilon_f_N = epsilon_f.N.u;
+    auto epsilon_f_S = epsilon_f.S.u;
+    #ifndef USE_2D
+    auto epsilon_f_F = epsilon_f.F.u;
+    auto epsilon_f_B = epsilon_f.B.u;
+    #endif
+    auto psi_f_E = psi_f.E.u;
+    auto psi_f_W = psi_f.W.u;
+    auto psi_f_N = psi_f.N.u;
+    auto psi_f_S = psi_f.S.u;
+    #ifndef USE_2D
+    auto psi_f_F = psi_f.F.u;
+    auto psi_f_B = psi_f.B.u;
+    #endif
+    auto norm_f_E = norm_f.E.u;
+    auto norm_f_W = norm_f.W.u;
+    auto norm_f_N = norm_f.N.u;
+    auto norm_f_S = norm_f.S.u;
+    #ifndef USE_2D
+    auto norm_f_F = norm_f.F.u;
+    auto norm_f_B = norm_f.B.u;
+    #endif
+    // First compute (phi) at faces (phi_diff_f) 
+    // Interpolate to East and West faces (x-direction)
+    Kokkos::parallel_for("Diffusion_Field", 
+    Kokkos::MDRangePolicy<Kokkos::Rank<3>>(
+        {1 , 1 , 1 }, 
+        {Nx + 1, Ny + 1, Nz + 1}), 
+    KOKKOS_LAMBDA(const int i, const int j, const int k) {
+        real_t Sharp_E = 0.25*(1.0-Kokkos::pow(Kokkos::tanh(0.5*psi_f_E(i,j,k)/epsilon_f_E(i,j,k)), 2))*
+                        norm_f_E(i,j,k);
+        real_t Sharp_W = 0.25*(1.0-Kokkos::pow(Kokkos::tanh(0.5*psi_f_W(i,j,k)/epsilon_f_W(i,j,k)), 2))*
+                        norm_f_W(i,j,k);
+        real_t Sharp_x = (Sharp_E - Sharp_W) / delx(i);
+        real_t Sharp_N = 0.25*(1.0-Kokkos::pow(Kokkos::tanh(0.5*psi_f_N(i,j,k)/epsilon_f_N(i,j,k)), 2))*
+                        norm_f_N(i,j,k);
+        real_t Sharp_S = 0.25*(1.0-Kokkos::pow(Kokkos::tanh(0.5*psi_f_S(i,j,k)/epsilon_f_S(i,j,k)), 2))*
+                        norm_f_S(i,j,k);
+        real_t Sharp_y = (Sharp_N - Sharp_S) / dely(j);
+        #ifndef USE_2D
+        real_t Sharp_F = 0.25*(1.0-Kokkos::pow(Kokkos::tanh(0.5*psi_f_F(i,j,k)/epsilon_f_F(i,j,k)), 2))*
+                        norm_f_F(i,j,k);
+        real_t Sharp_B = 0.25*(1.0-Kokkos::pow(Kokkos::tanh(0.5*psi_f_B(i,j,k)/epsilon_f_B(i,j,k)), 2))*
+                        norm_f_B(i,j,k);
+        real_t Sharp_z = (Sharp_F - Sharp_B) / delz(k);
+        Sharp_u(i,j,k) = Sharp_x + Sharp_y + Sharp_z;
+        #else
+        Sharp_u(i,j,k) = Sharp_x + Sharp_y;
+        #endif
+    });
+    Kokkos::fence();
+}
+
+================================================================================
+File: ./INCLUDE/bctype.hpp
+================================================================================
+
+// file: src/INCLUDE/bctype.hpp
+#ifndef BCTYPE_HPP
+#define BCTYPE_HPP
+
+#include "structs.hpp"
+
+// Boundary condition type constants
+#define BC_DIRICHLET 0
+#define BC_NEUMANN   1
+#define BC_PERIODIC  2
+
+struct bctype {
+    // Boundary condition types (0: Dirichlet, 1: Neumann, 2: Periodic)
+    int E;  // East (x+)
+    int W;  // West (x-)
+    int N;  // North (y+)
+    int S;  // South (y-)
+    int F;  // Front (z+)
+    int B;  // Back (z-)
+    
+    // Boundary condition values (used for Dirichlet and Neumann)
+    real_t E_val;  // East boundary value
+    real_t W_val;  // West boundary value
+    real_t N_val;  // North boundary value
+    real_t S_val;  // South boundary value
+    real_t F_val;  // Front boundary value
+    real_t B_val;  // Back boundary value
+    
+    // Default constructor - sets all to Dirichlet with zero value
+    bctype() : 
+        E(BC_DIRICHLET), W(BC_DIRICHLET), 
+        N(BC_DIRICHLET), S(BC_DIRICHLET), 
+        F(BC_DIRICHLET), B(BC_DIRICHLET),
+        E_val(0.0), W_val(0.0), 
+        N_val(0.0), S_val(0.0), 
+        F_val(0.0), B_val(0.0) {}
+    
+    // Constructor with type specification (all same type)
+    bctype(int type, real_t value = 0.0) : 
+        E(type), W(type), N(type), S(type), F(type), B(type),
+        E_val(value), W_val(value), N_val(value), 
+        S_val(value), F_val(value), B_val(value) {}
+    
+    // Check if any boundary is periodic
+    bool hasPeriodicBC() const {
+        return (E == BC_PERIODIC || W == BC_PERIODIC || 
+                N == BC_PERIODIC || S == BC_PERIODIC || 
+                F == BC_PERIODIC || B == BC_PERIODIC);
+    }
+    
+    // Check if a specific pair is periodic (must be consistent)
+    bool isPeriodicX() const { return (E == BC_PERIODIC && W == BC_PERIODIC); }
+    bool isPeriodicY() const { return (N == BC_PERIODIC && S == BC_PERIODIC); }
+    bool isPeriodicZ() const { return (F == BC_PERIODIC && B == BC_PERIODIC); }
+    
+    // Validate boundary conditions
+    bool validate() const {
+        // Check that boundary types are valid
+        if (E < 0 || E > 2 || W < 0 || W > 2 || 
+            N < 0 || N > 2 || S < 0 || S > 2 || 
+            F < 0 || F > 2 || B < 0 || B > 2) {
+            return false;
+        }
+        
+        // Check that periodic BCs are paired
+        if ((E == BC_PERIODIC) != (W == BC_PERIODIC)) {
+            std::cerr << "ERROR: Periodic BC must be set on both E and W boundaries\n";
+            return false;
+        }
+        if ((N == BC_PERIODIC) != (S == BC_PERIODIC)) {
+            std::cerr << "ERROR: Periodic BC must be set on both N and S boundaries\n";
+            return false;
+        }
+        if ((F == BC_PERIODIC) != (B == BC_PERIODIC)) {
+            std::cerr << "ERROR: Periodic BC must be set on both F and B boundaries\n";
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // Print boundary condition info
+    void print() const {
+        auto bcTypeString = [](int type) {
+            switch(type) {
+                case BC_DIRICHLET: return "Dirichlet";
+                case BC_NEUMANN:   return "Neumann";
+                case BC_PERIODIC:  return "Periodic";
+                default:           return "Unknown";
+            }
+        };
+        
+        std::cout << "Boundary Conditions:\n";
+        std::cout << "  East  (x+): " << bcTypeString(E) << ", value = " << E_val << "\n";
+        std::cout << "  West  (x-): " << bcTypeString(W) << ", value = " << W_val << "\n";
+        std::cout << "  North (y+): " << bcTypeString(N) << ", value = " << N_val << "\n";
+        std::cout << "  South (y-): " << bcTypeString(S) << ", value = " << S_val << "\n";
+        std::cout << "  Front (z+): " << bcTypeString(F) << ", value = " << F_val << "\n";
+        std::cout << "  Back  (z-): " << bcTypeString(B) << ", value = " << B_val << "\n";
+    }
+};
+
+#endif // BCTYPE_HPP
+
+================================================================================
+File: ./INCLUDE/face.cpp
+================================================================================
+
+// file: src/INCLUDE/face.cpp
+#include "face.hpp"
+#include "field.hpp"
+
+#include <iostream>
+
+Face::Face(const GridInfo* grid_ptr, const std::string& base_name) 
+    : grid(grid_ptr), 
+      basename(base_name),
+      E(grid, basename + "_E"),
+      W(grid, basename + "_W"),
+      N(grid, basename + "_N"),
+      S(grid, basename + "_S")
+      #ifndef USE_2D
+      ,F(grid, basename + "_F"),
+      B(grid, basename + "_B")
+      #endif
+{
+    if (!grid) {
+        std::cerr << "ERROR: Face constructor received null GridInfo pointer\n";
+        exit(EXIT_FAILURE);
+    }
+}
+
+Face::Face(const Face& other)
+    : grid(other.grid),
+      basename(other.basename + "_copy"),
+      E(other.E),
+      W(other.W),
+      N(other.N),
+      S(other.S)
+      #ifndef USE_2D
+      ,F(other.F),
+      B(other.B)
+      #endif
+{
+}
+
+Face& Face::operator=(const Face& other) {
+    if (this != &other) {
+        // Grid pointer should remain the same, just copy the data
+        basename = other.basename;
+        E = other.E;
+        W = other.W;
+        N = other.N;
+        S = other.S;
+        #ifndef USE_2D
+        F = other.F;
+        B = other.B;
+        #endif
+    }
+    return *this;
+}
+
+void Face::upload() {
+    E.upload();
+    W.upload();
+    N.upload();
+    S.upload();
+    #ifndef USE_2D
+    F.upload();
+    B.upload();
+    #endif
+}
+
+void Face::download() {
+    E.download();
+    W.download();
+    N.download();
+    S.download();
+    #ifndef USE_2D
+    F.download();
+    B.download();
+    #endif
+}
+
+void Face::fill(real_t value) {
+    E.fill(value);
+    W.fill(value);
+    N.fill(value);
+    S.fill(value);
+    #ifndef USE_2D
+    F.fill(value);
+    B.fill(value);
+    #endif
+}
+
+Face& Face::operator+=(const Face& other) {
+    E += other.E;
+    W += other.W;
+    N += other.N;
+    S += other.S;
+    #ifndef USE_2D
+    F += other.F;
+    B += other.B;
+    #endif
+    return *this;
+}
+
+Face& Face::operator*=(const Face& other) {
+    E *= other.E;
+    W *= other.W;
+    N *= other.N;
+    S *= other.S;
+    #ifndef USE_2D
+    F *= other.F;
+    B *= other.B;
+    #endif
+    return *this;
+}
+
+Face& Face::operator-=(const Face& other) {
+    E -= other.E;
+    W -= other.W;
+    N -= other.N;
+    S -= other.S;
+    #ifndef USE_2D
+    F -= other.F;
+    B -= other.B;
+    #endif
+    return *this;
+}
+
+Face& Face::operator*=(real_t scalar) {
+    E *= scalar;
+    W *= scalar;
+    N *= scalar;
+    S *= scalar;
+    #ifndef USE_2D
+    F *= scalar;
+    B *= scalar;
+    #endif
+    return *this;
+}
+
+Face& Face::operator/=(real_t scalar) {
+    E /= scalar;
+    W /= scalar;
+    N /= scalar;
+    S /= scalar;
+    #ifndef USE_2D
+    F /= scalar;
+    B /= scalar;
+    #endif
+    return *this;
+}
+
+Face& Face::operator+=(real_t scalar) {
+    E += scalar;
+    W += scalar;
+    N += scalar;
+    S += scalar;
+    #ifndef USE_2D
+    F += scalar;
+    B += scalar;
+    #endif
+    return *this;
+}
+
+Face& Face::operator-=(real_t scalar) {
+    E -= scalar;
+    W -= scalar;
+    N -= scalar;
+    S -= scalar;
+    #ifndef USE_2D
+    F -= scalar;
+    B -= scalar;
+    #endif
+    return *this;
+}
+
+Face Face::operator+(const Face& other) const {
+    Face result(*this);  // Copy constructor
+    result += other;
+    return result;
+}
+
+Face Face::operator*(const Face& other) const {
+    Face result(*this);
+    result *= other;
+    return result;
+}
+
+Face Face::operator-(const Face& other) const {
+    Face result(*this);
+    result -= other;
+    return result;
+}
+
+Face Face::operator+(real_t scalar) const {
+    Face result(*this);
+    result += scalar;
+    return result;
+}
+
+Face Face::operator-(real_t scalar) const {
+    Face result(*this);
+    result -= scalar;
+    return result;
+}
+
+Face Face::operator*(real_t scalar) const {
+    Face result(*this);
+    result *= scalar;
+    return result;
+}
+
+Face Face::operator/(real_t scalar) const {
+    Face result(*this);
+    result /= scalar;
+    return result;
+}
+
+void Face::printInfo() const {
+    std::cout << "\nFace collection: " << basename << std::endl;
+    E.printInfo();
+    W.printInfo();
+    N.printInfo();
+    S.printInfo();
+    #ifndef USE_2D
+    F.printInfo();
+    B.printInfo();
+    #endif
+}
+
+================================================================================
+File: ./INCLUDE/face.hpp
+================================================================================
+
+// file: src/INCLUDE/face.hpp
+#ifndef FACE_HPP
+#define FACE_HPP
+
+#include "field.hpp"
+#include "gridinfo.hpp"
+#include <string>
+
+class Face {
+public:
+    // Grid information pointer
+    const GridInfo* grid;
+    
+    // Base name for all face fields
+    std::string basename;
+    
+    // Face fields - direct objects, not pointers
+    Field E;  // East face (x+)
+    Field W;  // West face (x-)
+    Field N;  // North face (y+)
+    Field S;  // South face (y-)
+    #ifndef USE_2D
+    Field F;  // Front face (z+)
+    Field B;  // Back face (z-)
+    #endif
+    
+    // Constructor
+    Face(const GridInfo* grid_ptr, const std::string& base_name);
+    
+    // Copy constructor
+    Face(const Face& other);
+    
+    // Assignment operator
+    Face& operator=(const Face& other);
+    
+    // Upload all faces to device
+    void upload();
+    
+    // Download all faces from device
+    void download();
+    
+    // Fill all faces with a value
+    void fill(real_t value);
+    
+    // In-place operators
+    Face& operator+=(const Face& other);
+    Face& operator*=(const Face& other);
+    Face& operator-=(const Face& other);
+    Face& operator*=(real_t scalar);
+    Face& operator/=(real_t scalar);
+    Face& operator+=(real_t scalar);
+    Face& operator-=(real_t scalar);
+    
+    // Binary operators (create new Face)
+    Face operator+(const Face& other) const;
+    Face operator*(const Face& other) const;
+    Face operator-(const Face& other) const;
+    Face operator+(real_t scalar) const;
+    Face operator-(real_t scalar) const;
+    Face operator*(real_t scalar) const;
+    Face operator/(real_t scalar) const;
+    
+    // Print info
+    void printInfo() const;
+};
+
+// Friend function for scalar * Face
+inline Face operator*(real_t scalar, const Face& face) {
+    return face * scalar;
+}
+
+#endif // FACE_HPP
+
+================================================================================
+File: ./INCLUDE/field.cpp
+================================================================================
+
+// file: src/INCLUDE/field.cpp
+#include "field.hpp"
+// Constructor
+Field::Field(const GridInfo *grid_ptr, const std::string &field_name)
+    : grid(grid_ptr),
+      name(field_name),
+      Nx(grid->xgrid->N),
+      Ny(grid->ygrid->N),
+      Nz(grid->zgrid->N),
+      Ngl(grid->config.Ngl),
+      Ntotal((Nx + 2 * Ngl) * (Ny + 2 * Ngl) * (Nz + 2 * Ngl))
+{
+    if (!grid)
+    {
+        std::cerr << "ERROR: Field constructor received null GridInfo pointer\n";
+        exit(EXIT_FAILURE);
+    }
+    allocateArrays();
+}
+
+void Field::allocateArrays()
+{
+    auto x_bs = grid->xgrid->bs;
+    auto x_be = grid->xgrid->be;
+    auto y_bs = grid->ygrid->bs;
+    auto y_be = grid->ygrid->be;
+    auto z_bs = grid->zgrid->bs;
+    auto z_be = grid->zgrid->be;
+    // Create offset views directly with the proper bounds
+    // Goes from (1-Ngl, 1-Ngl, 1-Ngl) to (N+Ngl, N+Ngl, N+Ngl)
+    u = Kokkos::Experimental::OffsetView<real_t ***>(
+        name,
+        std::pair<int64_t, int64_t>{x_bs, x_be + 1},
+        std::pair<int64_t, int64_t>{y_bs, y_be + 1},
+        std::pair<int64_t, int64_t>{z_bs, z_be + 1});
+
+    u_h = Kokkos::Experimental::OffsetView<real_t ***, Kokkos::HostSpace>(
+        name + "_host",
+        std::pair<int64_t, int64_t>{x_bs, x_be + 1},
+        std::pair<int64_t, int64_t>{y_bs, y_be + 1},
+        std::pair<int64_t, int64_t>{z_bs, z_be + 1});
+
+    Kokkos::deep_copy(u_h, 0.0);
+    Kokkos::deep_copy(u, 0.0);
+}
+
+// Copy constructor
+Field::Field(const Field &other)
+    : grid(other.grid),
+      name(other.name + "_copy"),
+      Nx(other.Nx),
+      Ny(other.Ny),
+      Nz(other.Nz),
+      Ngl(other.Ngl),
+      Ntotal(other.Ntotal)
+{
+    allocateArrays();
+    deepCopy(other);
+}
+
+// Assignment operator
+Field &Field::operator=(const Field &other)
+{
+    if (this != &other)
+    {
+        if (Ntotal != other.Ntotal)
+        {
+            std::cerr << "ERROR: Cannot assign fields of different sizes\n";
+            exit(EXIT_FAILURE);
+        }
+        deepCopy(other);
+    }
+    return *this;
+}
+
+void Field::deepCopy(const Field &source)
+{
+    if (Ntotal != source.Ntotal)
+    {
+        std::cerr << "ERROR: Cannot deep copy fields of different sizes\n";
+        exit(EXIT_FAILURE);
+    }
+    Kokkos::deep_copy(u_h, source.u_h);
+    Kokkos::deep_copy(u, source.u);
+}
+
+void Field::upload()
+{
+    Kokkos::deep_copy(u, u_h);
+}
+
+void Field::download()
+{
+    Kokkos::deep_copy(u_h, u);
+}
+
+void Field::fill(real_t value)
+{
+    for (int i = 1 - Ngl; i <= Nx + Ngl; i++)
+    {
+        for (int j = 1 - Ngl; j <= Ny + Ngl; j++)
+        {
+            for (int k = 1 - Ngl; k <= Nz + Ngl; k++)
+            {
+                u_h(i, j, k) = value;
+            }
+        }
+    }
+}
+
+void Field::swap(Field &other)
+{
+    if (Ntotal != other.Ntotal)
+    {
+        std::cerr << "ERROR: Cannot swap fields of different sizes\n";
+        exit(EXIT_FAILURE);
+    }
+    std::swap(u, other.u);
+    std::swap(u_h, other.u_h);
+}
+
+void Field::printInfo() const
+{
+    std::cout << "\nField: " << name << std::endl;
+    std::cout << "  Dimensions: " << Nx << " x " << Ny << " x " << Nz << std::endl;
+    std::cout << "  Ghost layers: " << Ngl << std::endl;
+    std::cout << "  Total size: " << Ntotal << std::endl;
+    std::cout << "  Index ranges: [" << (1 - Ngl) << ":" << (Nx + Ngl)
+              << "] x [" << (1 - Ngl) << ":" << (Ny + Ngl)
+              << "] x [" << (1 - Ngl) << ":" << (Nz + Ngl) << "]" << std::endl;
+}
+
+void Field::add(const Field &a, const Field &b)
+{
+    if (Ntotal != a.Ntotal || Ntotal != b.Ntotal)
+    {
+        std::cerr << "ERROR: Cannot add fields of different sizes\n";
+        exit(EXIT_FAILURE);
+    }
+
+    auto u_dst = this->u;
+    auto u_a = a.u;
+    auto u_b = b.u;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_add", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) = u_a(i, j, k) + u_b(i, j, k); 
+        });
+
+    Kokkos::fence();
+}
+
+void Field::multiply(const Field &a, const Field &b)
+{
+    if (Ntotal != a.Ntotal || Ntotal != b.Ntotal)
+    {
+        std::cerr << "ERROR: Cannot multiply fields of different sizes\n";
+        exit(EXIT_FAILURE);
+    }
+
+    auto FullPolicy = grid->full_policy;
+
+    auto u_dst = this->u;
+    auto u_a = a.u;
+    auto u_b = b.u;
+
+    Kokkos::parallel_for("Field_multiply", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) = u_a(i, j, k) * u_b(i, j, k); 
+        });
+    Kokkos::fence();
+}
+
+Field &Field::operator+=(const Field &other)
+{
+    if (Ntotal != other.Ntotal)
+    {
+        std::cerr << "ERROR: Cannot add fields of different sizes\n";
+        exit(EXIT_FAILURE);
+    }
+
+    auto FullPolicy = grid->full_policy;
+
+    auto u_dst = this->u;
+    auto u_other = other.u;
+    
+    Kokkos::parallel_for("Field_add_inplace", 
+        FullPolicy,
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) += u_other(i, j, k); 
+        });
+    Kokkos::fence();
+    return *this;
+}
+
+Field &Field::operator*=(const Field &other)
+{
+    if (Ntotal != other.Ntotal)
+    {
+        std::cerr << "ERROR: Cannot multiply fields of different sizes\n";
+        exit(EXIT_FAILURE);
+    }
+
+    auto u_dst = this->u;
+    auto u_src = other.u;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_multiply_assign", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) *= u_src(i, j, k); 
+        });
+    Kokkos::fence();
+    return *this;
+}
+
+Field &Field::operator-=(const Field &other)
+{
+    if (Ntotal != other.Ntotal)
+    {
+        std::cerr << "ERROR: Cannot subtract fields of different sizes\n";
+        exit(EXIT_FAILURE);
+    }
+
+    auto u_dst = this->u;
+    auto u_src = other.u;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_subtract_assign", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) -= u_src(i, j, k); 
+        });
+    Kokkos::fence();
+    return *this;
+}
+
+Field Field::operator+(const Field &other) const
+{
+    Field result(this->grid, this->name + "_plus_" + other.name);
+    result.add(*this, other);
+    return result;
+}
+
+Field Field::operator*(const Field &other) const
+{
+    Field result(this->grid, this->name + "_times_" + other.name);
+    result.multiply(*this, other);
+    return result;
+}
+
+Field Field::operator-(const Field &other) const
+{
+    Field result(this->grid, this->name + "_minus_" + other.name);
+
+    auto u_dst = result.u;
+    auto u_a = this->u;
+    auto u_b = other.u;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_subtract", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) = u_a(i, j, k) - u_b(i, j, k); 
+        });
+    Kokkos::fence();
+    return result;
+}
+
+Field &Field::operator*=(real_t scalar)
+{
+    auto u_dst = this->u;
+    auto FullPolicy = grid->full_policy;    
+    Kokkos::parallel_for("Field_scalar_multiply", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) *= scalar; 
+        });
+    Kokkos::fence();
+    return *this;
+}
+
+Field &Field::operator/=(real_t scalar)
+{
+    auto u_dst = this->u;
+    auto FullPolicy = grid->full_policy;    
+    Kokkos::parallel_for("Field_scalar_divide", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) /= scalar; 
+        });
+    Kokkos::fence();
+    return *this;
+}
+
+Field &Field::operator+=(real_t scalar)
+{
+    auto u_dst = this->u;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_scalar_add_assign", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) += scalar; 
+        });
+    Kokkos::fence();
+    return *this;
+}
+
+Field &Field::operator-=(real_t scalar)
+{
+    auto u_dst = this->u;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_scalar_subtract_assign", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) -= scalar; 
+        });
+    Kokkos::fence();
+    return *this;
+}
+
+Field Field::operator*(real_t scalar) const
+{
+    Field result(*this); // Copy constructor
+    result *= scalar;
+    return result;
+}
+
+Field Field::operator/(real_t scalar) const
+{
+    Field result(*this); // Copy constructor
+    result /= scalar;
+    return result;
+}
+
+Field Field::operator-(real_t scalar) const
+{
+    Field result(this->grid, this->name + "_minus_scalar");
+
+    auto u_dst = result.u;
+    auto u_src = this->u;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_scalar_subtract", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) = u_src(i, j, k) - scalar; 
+        });
+    Kokkos::fence();
+    return result;
+}
+
+Field Field::operator+(real_t scalar) const
+{
+    Field result(this->grid, this->name + "_plus_scalar");
+
+    auto u_dst = result.u;
+    auto u_src = this->u;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_scalar_add", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) { 
+            u_dst(i, j, k) = u_src(i, j, k) + scalar; 
+        });
+    Kokkos::fence();
+    return result;
+}
+
+Field Field::inverse(real_t scalar) const
+{
+    Field result(this->grid, this->name + "_inverse");
+
+    auto u_dst = result.u;
+    auto u_src = this->u;
+    const real_t epsilon = REAL_EPSILON;
+    auto FullPolicy = grid->full_policy;
+    Kokkos::parallel_for("Field_inverse", 
+        FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) {
+            real_t denominator = u_src(i, j, k);
+            // Avoid division by zero
+            if (Kokkos::abs(denominator) < epsilon) {
+                denominator = (denominator >= 0) ? epsilon : -epsilon;
+            }
+            u_dst(i, j, k) = scalar / denominator; 
+        });
+    Kokkos::fence();
+    return result;
+}
+
+// Friend functions for scalar operations
+Field operator*(real_t scalar, const Field &field)
+{
+    return field * scalar;
+}
+
+Field operator/(real_t scalar, const Field &field)
+{
+    return field.inverse(scalar);
+}
+
+================================================================================
+File: ./INCLUDE/field.hpp
+================================================================================
+
+// file: src/INCLUDE/field.hpp
+#ifndef FIELD_HPP
+#define FIELD_HPP
+
+#include <Kokkos_Core.hpp>
+#include <Kokkos_OffsetView.hpp>
+#include "gridinfo.hpp"
+#include "structs.hpp"
+#include <iostream>
+#include <cstdlib>
+#include <string>
+
+class Field
+{
+public:
+    // Grid information pointer
+    const GridInfo *grid;
+
+    // Field name
+    const std::string name;
+
+    // Dimensions
+    const int Nx, Ny, Nz;
+    const int Ngl;
+    const int Ntotal;
+
+    // OffsetViews ONLY
+    Kokkos::Experimental::OffsetView<real_t ***> u;                      // Device
+    Kokkos::Experimental::OffsetView<real_t ***, Kokkos::HostSpace> u_h; // Host
+
+    // Constructor - RAII with GridInfo
+    Field(const GridInfo *grid_ptr, const std::string &field_name);
+
+    // Deep copy constructor
+    Field(const Field &other);
+
+    // Assignment operator
+    Field &operator=(const Field &other);
+
+    // Destructor
+    ~Field() = default;
+
+    // Device operations
+    void upload();
+    void download();
+
+    // Deep copy operation
+    void deepCopy(const Field &source);
+
+    // Additional methods
+    void fill(real_t value);
+    void swap(Field &other);
+    bool isOnDevice() const { return true; } // Always true for Kokkos
+
+    // Print info
+    void printInfo() const;
+
+    // this = a + b
+    void add(const Field &a, const Field &b);
+
+    // this = a * b
+    void multiply(const Field &a, const Field &b);
+
+    // Operator overloading
+    Field &operator+=(const Field &other);
+    Field &operator*=(const Field &other);
+    Field &operator-=(const Field &other);
+
+    // Binary operators (create new Field)
+    Field operator+(const Field &other) const;
+    Field operator*(const Field &other) const;
+    Field operator-(const Field &other) const;
+
+    // Scalar operations
+    Field &operator*=(real_t scalar);
+    Field &operator/=(real_t scalar);
+    Field &operator+=(real_t scalar);
+    Field &operator-=(real_t scalar);
+    Field operator*(real_t scalar) const;
+    Field operator/(real_t scalar) const;
+    Field operator-(real_t scalar) const;
+    Field operator+(real_t scalar) const;
+
+    // inverse
+    Field inverse(real_t scalar = 1.0) const;
+
+private:
+    void allocateArrays();
+};
+
+// Friend functions for scalar operations
+Field operator*(real_t scalar, const Field &field);
+Field operator/(real_t scalar, const Field &field);
+
+#endif // FIELD_HPP
+
+================================================================================
+File: ./INCLUDE/gridinfo.hpp
+================================================================================
+
+// file: src/INCLUDE/gridinfo.hpp
+#ifndef GRIDINFO_HPP
+#define GRIDINFO_HPP
+
+#include "oneDgridinfo.hpp"
+#include <memory>
+#include <string>
+
+// Grid configuration structure
+struct gridconfig
+{
+    int Ngl; // Number of ghost layers
+
+    // X direction
+    int Nx;
+    real_t x_start;
+    real_t x_end;
+    int x_option; // GRID_UNIFORM or GRID_NONUNIFORM
+
+    // Y direction
+    int Ny;
+    real_t y_start;
+    real_t y_end;
+    int y_option;
+
+    // Z direction
+    int Nz;
+    real_t z_start;
+    real_t z_end;
+    int z_option;
+    // Constructor with defaults
+    gridconfig() : Ngl(1),
+                   Nx(10), x_start(0.0), x_end(1.0), x_option(GRID_UNIFORM),
+                   Ny(10), y_start(0.0), y_end(1.0), y_option(GRID_UNIFORM),
+                   Nz(10), z_start(0.0), z_end(1.0), z_option(GRID_UNIFORM) {}
+};
+
+class GridInfo
+{
+public:
+    // Grid configuration
+    gridconfig config;
+    using Policy2D = Kokkos::MDRangePolicy<Kokkos::Rank<2>>;
+    using Policy3D = Kokkos::MDRangePolicy<Kokkos::Rank<3>>;
+
+    // 1D grid information for each direction
+    std::unique_ptr<oneDgridinfo> xgrid;
+    std::unique_ptr<oneDgridinfo> ygrid;
+    std::unique_ptr<oneDgridinfo> zgrid;
+
+    // 3D arrays for volumes and areas (cell-centered)
+    // Device views (using OffsetView)
+    Kokkos::Experimental::OffsetView<real_t ***> Vols;   // Cell volumes
+    Kokkos::Experimental::OffsetView<real_t ***> Area_E; // East face areas
+    Kokkos::Experimental::OffsetView<real_t ***> Area_W; // West face areas
+    Kokkos::Experimental::OffsetView<real_t ***> Area_N; // North face areas
+    Kokkos::Experimental::OffsetView<real_t ***> Area_S; // South face areas
+    Kokkos::Experimental::OffsetView<real_t ***> Area_F; // Front face areas
+    Kokkos::Experimental::OffsetView<real_t ***> Area_B;   // Back face areas 
+    Kokkos::Experimental::OffsetView<real_t ***> map;    // Cell maps
+
+    // Host mirrors
+    typename Kokkos::Experimental::OffsetView<real_t ***>::HostMirror Vols_h;
+    typename Kokkos::Experimental::OffsetView<real_t ***>::HostMirror Area_E_h;
+    typename Kokkos::Experimental::OffsetView<real_t ***>::HostMirror Area_W_h;
+    typename Kokkos::Experimental::OffsetView<real_t ***>::HostMirror Area_N_h;
+    typename Kokkos::Experimental::OffsetView<real_t ***>::HostMirror Area_S_h;
+    typename Kokkos::Experimental::OffsetView<real_t ***>::HostMirror Area_F_h;
+    typename Kokkos::Experimental::OffsetView<real_t ***>::HostMirror Area_B_h;
+    typename Kokkos::Experimental::OffsetView<real_t ***>::HostMirror map_h;    
+    Policy3D interior_policy;
+    Policy3D full_policy; 
+    Policy2D xBoundary_policy; 
+    Policy2D yBoundary_policy;
+    Policy2D zBoundary_policy;
+
+    // Constructor
+    GridInfo(const gridconfig &config_in);
+
+    // Destructor
+    ~GridInfo() = default;
+
+    // Print summary
+    void printSummary() const;
+
+private:
+    void allocateArrays();
+    void computeVolumesAndAreas();
+    void initializeCellMap();  
+    void uploadToDevice();
+};
+
+// Implementation
+
+inline GridInfo::GridInfo(const gridconfig &config_in) : config(config_in)
+{
+// Adjust for 2D case
+#ifdef USE_2D
+    config.z_start = -0.5;
+    config.z_end = 0.5;
+    config.Nz = 1;
+    config.z_option = GRID_UNIFORM;
+    int z_ngl = 0; // No ghost cells in z for 2D
+#else
+    int z_ngl = config.Ngl;
+#endif
+
+    // Create 1D grids
+    std::string xfile = config.x_option == GRID_NONUNIFORM ? "xgrid.dat" : "";
+    std::string yfile = config.y_option == GRID_NONUNIFORM ? "ygrid.dat" : "";
+    std::string zfile = config.z_option == GRID_NONUNIFORM ? "zgrid.dat" : "";
+
+    xgrid = std::make_unique<oneDgridinfo>(config.Nx, config.Ngl, config.x_start, config.x_end,
+                                           "x", config.x_option, xfile);
+    ygrid = std::make_unique<oneDgridinfo>(config.Ny, config.Ngl, config.y_start, config.y_end,
+                                           "y", config.y_option, yfile);
+    zgrid = std::make_unique<oneDgridinfo>(config.Nz, z_ngl, config.z_start, config.z_end,
+                                           "z", config.z_option, zfile);
+    auto x_ce = xgrid->ce;
+    auto y_ce = ygrid->ce;
+    auto z_ce = zgrid->ce;
+    auto x_cs = xgrid->cs;
+    auto y_cs = ygrid->cs;
+    auto z_cs = zgrid->cs;
+    auto x_be = xgrid->be;
+    auto y_be = ygrid->be;
+    auto z_be = zgrid->be;
+    auto x_bs = xgrid->bs;
+    auto y_bs = ygrid->bs;
+    auto z_bs = zgrid->bs;
+
+    interior_policy = Policy3D({{x_cs, y_cs, z_cs}}, {{x_ce + 1, y_ce + 1, z_ce + 1}});
+    full_policy = Policy3D({{x_bs, y_bs, z_bs}}, {{x_be + 1, y_be + 1, z_be + 1}});
+    xBoundary_policy = Policy2D({{y_bs, z_bs}}, {{y_be + 1, z_be + 1}});
+    yBoundary_policy = Policy2D({{x_bs, z_bs}}, {{x_be + 1, z_be + 1}});
+    zBoundary_policy = Policy2D({{x_bs, y_bs}}, {{x_be + 1, y_be + 1}});
+
+    // Allocate 3D arrays
+    allocateArrays();
+
+    // Compute volumes and areas
+    computeVolumesAndAreas();
+
+    // Initialize cell map
+    initializeCellMap();
+
+    // Upload to device
+    uploadToDevice();
+}
+
+inline void GridInfo::allocateArrays() {
+    // Create begins array for OffsetView
+    Kokkos::Array<int64_t, 3> begins = {xgrid->bs, ygrid->bs, zgrid->bs};
+    Kokkos::Array<int64_t, 3> ends = {xgrid->be + 1, ygrid->be + 1, zgrid->be + 1};
+    
+    // Allocate device views with offset indexing using std::pair ranges
+    Vols = Kokkos::Experimental::OffsetView<real_t***>(
+        "Cell_Volumes",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_E = Kokkos::Experimental::OffsetView<real_t***>(
+        "Area_East",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_W = Kokkos::Experimental::OffsetView<real_t***>(
+        "Area_West",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_N = Kokkos::Experimental::OffsetView<real_t***>(
+        "Area_North",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_S = Kokkos::Experimental::OffsetView<real_t***>(
+        "Area_South",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_F = Kokkos::Experimental::OffsetView<real_t***>(
+        "Area_Front",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_B = Kokkos::Experimental::OffsetView<real_t***>(
+        "Area_Back",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    map = Kokkos::Experimental::OffsetView<real_t***>(
+        "Cell_Map",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    // Create host mirrors
+    Vols_h = Kokkos::Experimental::OffsetView<real_t***, Kokkos::HostSpace>(
+        "Cell_Volumes_host",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_E_h = Kokkos::Experimental::OffsetView<real_t***, Kokkos::HostSpace>(
+        "Area_East_host",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_W_h = Kokkos::Experimental::OffsetView<real_t***, Kokkos::HostSpace>(
+        "Area_West_host",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_N_h = Kokkos::Experimental::OffsetView<real_t***, Kokkos::HostSpace>(
+        "Area_North_host",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_S_h = Kokkos::Experimental::OffsetView<real_t***, Kokkos::HostSpace>(
+        "Area_South_host",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_F_h = Kokkos::Experimental::OffsetView<real_t***, Kokkos::HostSpace>(
+        "Area_Front_host",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    Area_B_h = Kokkos::Experimental::OffsetView<real_t***, Kokkos::HostSpace>(
+        "Area_Back_host",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+    
+    map_h = Kokkos::Experimental::OffsetView<real_t***, Kokkos::HostSpace>(
+        "Cell_Map_host",
+        std::pair<int64_t, int64_t>{begins[0], ends[0]},
+        std::pair<int64_t, int64_t>{begins[1], ends[1]},
+        std::pair<int64_t, int64_t>{begins[2], ends[2]});
+}
+
+inline void GridInfo::computeVolumesAndAreas()
+{
+    // Get grid data
+    auto &dc_x = xgrid->dc_h;
+    auto &dc_y = ygrid->dc_h;
+    auto &dc_z = zgrid->dc_h;
+
+    // Compute for all cells including ghosts
+    for (int i = xgrid->bs; i <= xgrid->be; i++)
+    {
+        for (int j = ygrid->bs; j <= ygrid->be; j++)
+        {
+            for (int k = zgrid->bs; k <= zgrid->be; k++)
+            {
+                // Map to array indices (0-based)
+// Direct indexing with OffsetView
+// Volume = dx * dy * dz
+            Vols_h(i, j, k) = dc_x(i) * dc_y(j) * dc_z(k);
+
+            // Face areas
+            Area_E_h(i, j, k) = dc_y(j) * dc_z(k); // East face (x+)
+            Area_W_h(i, j, k) = dc_y(j) * dc_z(k); // West face (x-)
+            Area_N_h(i, j, k) = dc_x(i) * dc_z(k); // North face (y+)
+            Area_S_h(i, j, k) = dc_x(i) * dc_z(k); // South face (y-)
+            Area_F_h(i, j, k) = dc_x(i) * dc_y(j); // Front face (z+)
+            Area_B_h(i, j, k) = dc_x(i) * dc_y(j); // Back face (z-)
+            }
+        }
+    }
+}
+
+inline void GridInfo::initializeCellMap()
+{
+    // Initialize all cells to -1
+    Kokkos::deep_copy(map_h, -1.0);
+
+    // Set halo points (boundary cells) to 0
+    // X boundaries
+    for (int j = ygrid->bs; j <= ygrid->be; j++)
+    {
+        for (int k = zgrid->bs; k <= zgrid->be; k++)
+        {
+            // Left boundary
+            for (int i = xgrid->bs; i < xgrid->cs; i++)
+            {
+                map_h(i, j, k) = 0.0;
+            }
+            // Right boundary
+            for (int i = xgrid->ce + 1; i <= xgrid->be; i++)
+            {
+                map_h(i, j, k) = 0.0;
+            }
+        }
+    }
+
+    // Y boundaries
+    for (int i = xgrid->bs; i <= xgrid->be; i++)
+    {
+        for (int k = zgrid->bs; k <= zgrid->be; k++)
+        {
+            // Bottom boundary
+            for (int j = ygrid->bs; j < ygrid->cs; j++)
+            {
+                map_h(i, j, k) = 0.0;
+            }
+            // Top boundary
+            for (int j = ygrid->ce + 1; j <= ygrid->be; j++)
+            {
+                map_h(i, j, k) = 0.0;
+            }
+        }
+    }
+
+// Z boundaries (if 3D)
+#ifndef USE_2D
+    for (int i = xgrid->bs; i <= xgrid->be; i++)
+    {
+        for (int j = ygrid->bs; j <= ygrid->be; j++)
+        {
+            // Back boundary
+            for (int k = zgrid->bs; k < zgrid->cs; k++)
+            {
+                map_h(i, j, k) = 0.0;
+            }
+            // Front boundary
+            for (int k = zgrid->ce + 1; k <= zgrid->be; k++)
+            {
+                map_h(i, j, k) = 0.0;
+            }
+        }
+    }
+#endif
+
+    // Now propagate the map values
+    bool changed = true;
+    int current_level = 0;
+
+    while (changed)
+    {
+        changed = false;
+
+        // Loop through interior cells only
+        for (int i = xgrid->cs; i <= xgrid->ce; i++)
+        {
+            for (int j = ygrid->cs; j <= ygrid->ce; j++)
+            {
+                for (int k = zgrid->cs; k <= zgrid->ce; k++)
+                {
+
+                    // Skip if already set
+                    if (map_h(i, j, k) >= 0)
+                        continue;
+
+                    // Check all 6 neighbors
+                    bool has_neighbor_at_level = false;
+
+                    // Check x neighbors
+                    if (map_h(i - 1, j, k) == current_level ||
+                        map_h(i + 1, j, k) == current_level)
+                    {
+                        has_neighbor_at_level = true;
+                    }
+
+                    // Check y neighbors
+                    if (map_h(i, j - 1, k) == current_level ||
+                        map_h(i, j + 1, k) == current_level)
+                    {
+                        has_neighbor_at_level = true;
+                    }
+
+                    // Check z neighbors
+                    if (map_h(i, j, k - 1) == current_level ||
+                        map_h(i, j, k + 1) == current_level)
+                    {
+                        has_neighbor_at_level = true;
+                    }
+
+                    // Set to next level if has neighbor at current level
+                    if (has_neighbor_at_level)
+                    {
+                        map_h(i, j, k) = current_level + 1;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // Move to next level
+        if (changed)
+        {
+            current_level++;
+            // Cap at 2 as per requirement
+            if (current_level >= config.Ngl)
+            {
+                current_level = config.Ngl;
+            }
+        }
+    }
+}
+
+inline void GridInfo::uploadToDevice()
+{
+    Kokkos::deep_copy(Vols, Vols_h);
+    Kokkos::deep_copy(Area_E, Area_E_h);
+    Kokkos::deep_copy(Area_W, Area_W_h);
+    Kokkos::deep_copy(Area_N, Area_N_h);
+    Kokkos::deep_copy(Area_S, Area_S_h);
+    Kokkos::deep_copy(Area_F, Area_F_h);
+    Kokkos::deep_copy(Area_B, Area_B_h);
+    Kokkos::deep_copy(map, map_h); // Add this line
+}
+
+inline void GridInfo::printSummary() const
+{
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "3D Grid Information Summary" << std::endl;
+    std::cout << "========================================" << std::endl;
+
+    std::cout << "\nGrid Configuration:" << std::endl;
+    std::cout << "  Ghost layers (Ngl): " << config.Ngl << std::endl;
+#ifdef USE_2D
+    std::cout << "  Mode: 2D (z-direction forced to single cell)" << std::endl;
+#else
+    std::cout << "  Mode: 3D" << std::endl;
+#endif
+
+    std::cout << "\nDomain:" << std::endl;
+    std::cout << "  X: [" << xgrid->start << ", " << xgrid->end << "] with Nx = " << config.Nx << std::endl;
+    std::cout << "  Y: [" << ygrid->start << ", " << ygrid->end << "] with Ny = " << config.Ny << std::endl;
+    std::cout << "  Z: [" << zgrid->start << ", " << zgrid->end << "] with Nz = " << config.Nz << std::endl;
+
+    std::cout << "\nTotal cells (including ghosts):" << std::endl;
+    std::cout << "  X: " << (xgrid->N + 2 * xgrid->Ngl) << " cells" << std::endl;
+    std::cout << "  Y: " << (ygrid->N + 2 * ygrid->Ngl) << " cells" << std::endl;
+    std::cout << "  Z: " << (zgrid->N + 2 * zgrid->Ngl) << " cells" << std::endl;
+    int total_cells = (xgrid->N + 2 * xgrid->Ngl) * (ygrid->N + 2 * ygrid->Ngl) * (zgrid->N + 2 * zgrid->Ngl);
+    std::cout << "  Total: " << total_cells << " cells" << std::endl;
+
+    std::cout << "\nMinimum grid spacings:" << std::endl;
+    std::cout << "  dx_min: " << xgrid->dmin << std::endl;
+    std::cout << "  dy_min: " << ygrid->dmin << std::endl;
+    std::cout << "  dz_min: " << zgrid->dmin << std::endl;
+
+    // Sample volume and areas at center
+    int ic = (xgrid->cs + xgrid->ce) / 2;  // Use actual grid center
+    int jc = (ygrid->cs + ygrid->ce) / 2;
+    int kc = (zgrid->cs + zgrid->ce) / 2;
+    std::cout << "\nSample values at center cell [" << ic << "," << jc << "," << kc << "]:" << std::endl;
+    std::cout << "  Volume: " << Vols_h(ic, jc, kc) << std::endl;
+    std::cout << "  Area_E: " << Area_E_h(ic, jc, kc) << std::endl;
+    std::cout << "  Area_N: " << Area_N_h(ic, jc, kc) << std::endl;
+    std::cout << "  Area_F: " << Area_F_h(ic, jc, kc) << std::endl;
+
+    std::cout << "\nDetailed 1D grid information:" << std::endl;
+    std::cout << "\n--- X Grid ---" << std::endl;
+    xgrid->printSummary();
+    std::cout << "\n--- Y Grid ---" << std::endl;
+    ygrid->printSummary();
+    std::cout << "\n--- Z Grid ---" << std::endl;
+    zgrid->printSummary();
+
+    std::cout << "========================================\n"
+              << std::endl;
+}
+
+#endif // GRIDINFO_HPP
+
+================================================================================
+File: ./INCLUDE/include.hpp
+================================================================================
+
+// file: src/INCLUDE/include.hpp
+#ifndef INCLUDE_HPP
+#define INCLUDE_HPP
+
+// Include all project headers in dependency order
+#include "structs.hpp"
+#include "oneDgridinfo.hpp"
+#include "gridinfo.hpp"
+#include "field.hpp"
+#include "face.hpp"
+#include "bctype.hpp"
+#include "inputreader.hpp"
+#include "phasefield.hpp"
+
+// Include Kokkos
+#include <Kokkos_Core.hpp>
+#include <Kokkos_OffsetView.hpp>
+
+// Include common standard libraries
+#include <iostream>
+#include <fstream>
+#include <iomanip>
+#include <cmath>
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <cstdlib>
+#include <cstdio>
+#include <chrono>
+#include <limits>
+
+#endif 
+// INCLUDE_HPP
+
+================================================================================
+File: ./INCLUDE/inputreader.hpp
+================================================================================
+
+// file: src/INCLUDE/inputreader.hpp
+#ifndef INPUTREADER_HPP
+#define INPUTREADER_HPP
+
+#include "include.hpp"
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+
+struct InputParams
+{
+    // Grid configuration
+    int Nx, Ny, Nz, Ngl;
+    int xmode, ymode, zmode;
+    real_t xstart, xend;
+    real_t ystart, yend;
+    real_t zstart, zend;
+
+    // Solver configuration
+    real_t dt;
+    int nstart, nend;
+    int nprint, ndump;
+
+    // Field initialization
+    real_t x0, y0, z0;
+    real_t radius;
+    int mode; // 0: psi positive inside, 1: psi negative inside
+
+    // Phase field parameters
+    real_t epsilon_fac;
+    real_t gamma_fac;
+
+    // Boundary conditions
+    int bc_east, bc_west, bc_north, bc_south, bc_front, bc_back;
+    real_t valbc_east, valbc_west, valbc_north, valbc_south, valbc_front, valbc_back;
+
+    // Convert to gridconfig
+    gridconfig toGridConfig() const
+    {
+        gridconfig config;
+        config.Ngl = Ngl; // Use the value from input file
+
+        // X direction
+        config.Nx = Nx;
+        config.x_start = xstart;
+        config.x_end = xend;
+        config.x_option = xmode;
+
+        // Y direction
+        config.Ny = Ny;
+        config.y_start = ystart;
+        config.y_end = yend;
+        config.y_option = ymode;
+
+        // Z direction
+        config.Nz = Nz;
+        config.z_start = zstart;
+        config.z_end = zend;
+        config.z_option = zmode;
+
+        return config;
+    }
+
+    // Convert to bctype
+    bctype toBCType() const
+    {
+        bctype bc;
+        bc.E = bc_east;
+        bc.W = bc_west;
+        bc.N = bc_north;
+        bc.S = bc_south;
+        bc.F = bc_front;
+        bc.B = bc_back;
+
+        bc.E_val = valbc_east;
+        bc.W_val = valbc_west;
+        bc.N_val = valbc_north;
+        bc.S_val = valbc_south;
+        bc.F_val = valbc_front;
+        bc.B_val = valbc_back;
+
+        return bc;
+    }
+};
+
+class InputReader
+{
+public:
+    static InputParams readInputFile(const std::string &filename = "input.dat")
+    {
+        InputParams params;
+        std::ifstream file(filename);
+
+        if (!file.is_open())
+        {
+            std::cerr << "Error: Cannot open input file '" << filename << "'\n";
+            exit(1);
+        }
+
+        std::string line;
+
+        // Skip header lines
+        for (int i = 0; i < 4; i++)
+            std::getline(file, line);
+
+        // Grid configuration
+        std::getline(file, line);                                  // Nx Ny Nz Ngl
+        file >> params.Nx >> params.Ny >> params.Nz >> params.Ngl; // Read Ngl
+        std::getline(file, line);                                  // consume rest of line
+
+        std::getline(file, line); // xmode xstart xend
+        file >> params.xmode >> params.xstart >> params.xend;
+        std::getline(file, line);
+
+        std::getline(file, line); // ymode ystart yend
+        file >> params.ymode >> params.ystart >> params.yend;
+        std::getline(file, line);
+
+        std::getline(file, line); // zmode zstart zend
+        file >> params.zmode >> params.zstart >> params.zend;
+        std::getline(file, line);
+
+        // Skip separator
+        std::getline(file, line);
+
+        // Solver configuration
+        std::getline(file, line); // dt nstart nend nprint ndump
+        file >> params.dt >> params.nstart >> params.nend >> params.nprint >> params.ndump;
+        std::getline(file, line);
+
+        // Skip separator
+        std::getline(file, line);
+
+        // Field initialization
+        std::getline(file, line); // x0 y0 z0 radius mode
+        file >> params.x0 >> params.y0 >> params.z0 >> params.radius >> params.mode;
+        std::getline(file, line);
+
+        // Skip separator
+        std::getline(file, line);
+
+        // Phase field parameters
+        std::getline(file, line); // epsilon_fac gamma_fac
+        file >> params.epsilon_fac >> params.gamma_fac;
+        std::getline(file, line);
+
+        // Skip separator
+        std::getline(file, line);
+
+        // Boundary conditions
+        std::getline(file, line); // bc_east valbc_east
+        file >> params.bc_east >> params.valbc_east;
+        std::getline(file, line);
+
+        std::getline(file, line); // bc_west valbc_west
+        file >> params.bc_west >> params.valbc_west;
+        std::getline(file, line);
+
+        std::getline(file, line); // bc_north valbc_north
+        file >> params.bc_north >> params.valbc_north;
+        std::getline(file, line);
+
+        std::getline(file, line); // bc_south valbc_south
+        file >> params.bc_south >> params.valbc_south;
+
+        std::getline(file, line); // bc_front valbc_front
+        file >> params.bc_front >> params.valbc_front;
+
+        std::getline(file, line); // bc_back valbc_back
+        file >> params.bc_back >> params.valbc_back;
+
+        file.close();
+
+        return params;
+    }
+
+    static void printParams(const InputParams &params)
+    {
+        std::cout << "\n=== Input Parameters ===\n";
+        std::cout << "Grid: " << params.Nx << " x " << params.Ny << " x " << params.Nz
+                  << " with " << params.Ngl << " ghost layers\n"; // Show Ngl
+        std::cout << "Domain: [" << params.xstart << ", " << params.xend << "] x ["
+                  << params.ystart << ", " << params.yend << "] x ["
+                  << params.zstart << ", " << params.zend << "]\n";
+        std::cout << "Time step: " << params.dt << "\n";
+        std::cout << "Time steps: " << params.nstart << " to " << params.nend << "\n";
+        std::cout << "Output frequency: print=" << params.nprint << ", dump=" << params.ndump << "\n";
+        std::cout << "Initial condition: center=(" << params.x0 << ", " << params.y0 << ", " << params.z0
+                  << "), radius=" << params.radius << ", mode=" << params.mode << "\n";
+        std::cout << "Phase field: epsilon_fac=" << params.epsilon_fac
+                  << ", gamma_fac=" << params.gamma_fac << "\n";
+        std::cout << "=======================\n\n";
+    }
+};
+
+#endif // INPUTREADER_HPP
+
+================================================================================
+File: ./INCLUDE/oneDgridinfo.hpp
+================================================================================
+
+// file: src/INCLUDE/oneDgridinfo.hpp
+#ifndef ONEDGRIDINFO_HPP
+#define ONEDGRIDINFO_HPP
+
+#include <Kokkos_Core.hpp>
+#include <Kokkos_OffsetView.hpp>
+#include <string>
+#include <fstream>
+#include <iostream>
+#include <cstdlib>
+#include <algorithm>
+#include <limits>
+#include <iomanip>
+#include "structs.hpp"
+
+// Grid type defines
+#define GRID_UNIFORM 0
+#define GRID_NONUNIFORM 1
+
+class oneDgridinfo {
+public:
+    // Scalars
+    const int N;
+    const int Ngl;
+    real_t start;
+    real_t end;
+    real_t dmin;
+    const int init_option;
+    const std::string filename;
+    const std::string varname;
+    
+    // Index limits
+    const int cs = 1;          // cell start
+    const int ce;              // cell end (= N)
+    const int fs = 1;          // face start
+    const int fe;              // face end (= N+1)
+    const int bs; 
+    const int be;              // boundary start and end (including ghosts)
+    const int bfs;              // face start including ghosts
+    const int bfe;              // face end including ghosts (= N+Ngl+1
+    // Regular Views (underlying storage)
+    Kokkos::View<real_t*> c_view;
+    Kokkos::View<real_t*> dc_view;
+    Kokkos::View<real_t*> dc_inv_view;
+    Kokkos::View<real_t*> f_view;
+    Kokkos::View<real_t*> df_view;
+    Kokkos::View<real_t*> df_inv_view;
+    Kokkos::View<real_t*> inp_view;
+    
+    // Host mirrors
+    typename Kokkos::View<real_t*>::HostMirror c_view_h;
+    typename Kokkos::View<real_t*>::HostMirror dc_view_h;
+    typename Kokkos::View<real_t*>::HostMirror dc_inv_view_h;
+    typename Kokkos::View<real_t*>::HostMirror f_view_h;
+    typename Kokkos::View<real_t*>::HostMirror df_view_h;
+    typename Kokkos::View<real_t*>::HostMirror df_inv_view_h;
+    typename Kokkos::View<real_t*>::HostMirror inp_view_h;
+    
+    // Offset Views - Cell arrays
+    Kokkos::Experimental::OffsetView<real_t*> c;
+    Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace> c_h;
+    Kokkos::Experimental::OffsetView<real_t*> dc;
+    Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace> dc_h;
+    Kokkos::Experimental::OffsetView<real_t*> dc_inv;
+    Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace> dc_inv_h;
+    
+    // Offset Views - Face arrays  
+    Kokkos::Experimental::OffsetView<real_t*> f;
+    Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace> f_h;
+    Kokkos::Experimental::OffsetView<real_t*> df;
+    Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace> df_h;
+    Kokkos::Experimental::OffsetView<real_t*> df_inv;
+    Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace> df_inv_h;
+    
+    // Interpolation metrics
+    Kokkos::Experimental::OffsetView<real_t*> inp;
+    Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace> inp_h;
+    
+    // Constructor
+    oneDgridinfo(int N_in, int Ngl_in, real_t start_in, real_t end_in, 
+                 const std::string& varname_in,
+                 int init_option_in = GRID_UNIFORM, 
+                 const std::string& filename_in = "");
+    
+    // Destructor
+    ~oneDgridinfo() = default;
+    
+    // Print summary
+    void printSummary() const;
+    
+private:
+    void allocateArrays();
+    void initializeUniformGrid();
+    void initializeNonUniformGrid();
+    void computeCellCenters();
+    void computeDifferences();
+    void computeInterpolationMetrics();
+    void uploadToDevice();
+};
+
+// Implementation
+
+inline oneDgridinfo::oneDgridinfo(int N_in, int Ngl_in, real_t start_in, real_t end_in, 
+                                  const std::string& varname_in,
+                                  int init_option_in, 
+                                  const std::string& filename_in) 
+    : N(N_in), Ngl(Ngl_in), start(start_in), end(end_in),
+      init_option(init_option_in), filename(filename_in), varname(varname_in),
+      ce(N), fe(N+1), bs(1-Ngl), be(N+Ngl), bfs(1-Ngl), bfe(N+Ngl+1) {
+    
+    // Allocate all arrays
+    allocateArrays();
+    
+    // Initialize face centers
+    if (init_option == GRID_UNIFORM) {
+        initializeUniformGrid();
+    } else {
+        initializeNonUniformGrid();
+    }
+    
+    // Compute cell centers
+    computeCellCenters();
+    
+    // Compute differences
+    computeDifferences();
+    
+    // Compute interpolation metrics
+    computeInterpolationMetrics();
+    
+    // Upload everything to device
+    uploadToDevice();
+}
+
+inline void oneDgridinfo::allocateArrays() {
+    // Cell arrays - size N+2*Ngl
+    c = Kokkos::Experimental::OffsetView<real_t*>(
+        varname + "_cell_centers",
+        std::pair<int64_t, int64_t>{bs, be + 1});
+    
+    c_h = Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace>(
+        varname + "_cell_centers_host",
+        std::pair<int64_t, int64_t>{bs, be + 1});
+    
+    dc = Kokkos::Experimental::OffsetView<real_t*>(
+        varname + "_cell_diff",
+        std::pair<int64_t, int64_t>{bs, be + 1});
+    
+    dc_h = Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace>(
+        varname + "_cell_diff_host",
+        std::pair<int64_t, int64_t>{bs, be + 1});
+    
+    dc_inv = Kokkos::Experimental::OffsetView<real_t*>(
+        varname + "_cell_diff_inv",
+        std::pair<int64_t, int64_t>{bs, be + 1});
+    
+    dc_inv_h = Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace>(
+        varname + "_cell_diff_inv_host",
+        std::pair<int64_t, int64_t>{bs, be + 1});
+    
+    // Face arrays - size N+2*Ngl+1
+    f = Kokkos::Experimental::OffsetView<real_t*>(
+        varname + "_face_centers",
+        std::pair<int64_t, int64_t>{bfs, bfe + 1});
+    
+    f_h = Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace>(
+        varname + "_face_centers_host",
+        std::pair<int64_t, int64_t>{bfs, bfe + 1});
+    
+    df = Kokkos::Experimental::OffsetView<real_t*>(
+        varname + "_face_diff",
+        std::pair<int64_t, int64_t>{bfs, bfe + 1});
+    
+    df_h = Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace>(
+        varname + "_face_diff_host",
+        std::pair<int64_t, int64_t>{bfs, bfe + 1});
+    
+    df_inv = Kokkos::Experimental::OffsetView<real_t*>(
+        varname + "_face_diff_inv",
+        std::pair<int64_t, int64_t>{bfs, bfe + 1});
+    
+    df_inv_h = Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace>(
+        varname + "_face_diff_inv_host",
+        std::pair<int64_t, int64_t>{bfs, bfe + 1});
+    
+    // Interpolation metrics
+    inp = Kokkos::Experimental::OffsetView<real_t*>(
+        varname + "_interp_factor",
+        std::pair<int64_t, int64_t>{bfs, bfe + 1});
+    
+    inp_h = Kokkos::Experimental::OffsetView<real_t*, Kokkos::HostSpace>(
+        varname + "_interp_factor_host",
+        std::pair<int64_t, int64_t>{bfs, bfe + 1});
+    
+    // Initialize all arrays to zero
+    Kokkos::deep_copy(c_h, 0.0);
+    Kokkos::deep_copy(c, 0.0);
+    Kokkos::deep_copy(dc_h, 0.0);
+    Kokkos::deep_copy(dc, 0.0);
+    Kokkos::deep_copy(dc_inv_h, 0.0);
+    Kokkos::deep_copy(dc_inv, 0.0);
+    Kokkos::deep_copy(f_h, 0.0);
+    Kokkos::deep_copy(f, 0.0);
+    Kokkos::deep_copy(df_h, 0.0);
+    Kokkos::deep_copy(df, 0.0);
+    Kokkos::deep_copy(df_inv_h, 0.0);
+    Kokkos::deep_copy(df_inv, 0.0);
+    Kokkos::deep_copy(inp_h, 0.0);
+    Kokkos::deep_copy(inp, 0.0);
+}
+
+inline void oneDgridinfo::initializeUniformGrid() {
+    real_t dx = (end - start) / N;
+    
+    // Initialize interior faces (1 to N+1)
+    for (int i = 1; i <= N+1; i++) {
+        f_h(i) = start + (i-1) * dx;
+    }
+    
+    // Set boundary faces
+    for (int i = 1; i <= Ngl; i++) {
+        f_h(1-i) = f_h(1) - i * dx;
+        f_h(N+1+i) = f_h(N+1) + i * dx;
+    }
+}
+
+inline void oneDgridinfo::initializeNonUniformGrid() {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Cannot open file " << filename << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    
+    int idx;
+    real_t value;
+    real_t min_val = std::numeric_limits<real_t>::max();
+    real_t max_val = std::numeric_limits<real_t>::lowest();
+    
+    // Read interior faces
+    while (file >> idx >> value) {
+        if (idx >= 1 && idx <= N+1) {
+            f_h(idx) = value;
+            min_val = std::min(min_val, value);
+            max_val = std::max(max_val, value);
+        }
+    }
+    file.close();
+    
+    // Override start and end with values from file
+    start = min_val;
+    end = max_val;
+    
+    // Set boundary faces using extrapolation
+    real_t dx_left = f_h(2) - f_h(1);
+    real_t dx_right = f_h(N+1) - f_h(N);
+    
+    for (int i = 1; i <= Ngl; i++) {
+        f_h(1-i) = f_h(1) - i * dx_left;
+        f_h(N+1+i) = f_h(N+1) + i * dx_right;
+    }
+}
+
+inline void oneDgridinfo::computeCellCenters() {
+    // Interior cells: c(i) = 0.5*(f(i) + f(i+1))
+    for (int i = 1; i <= N; i++) {
+        c_h(i) = 0.5 * (f_h(i) + f_h(i+1));
+    }
+    
+    // Boundary cells - equidistant
+    real_t dx_left = f_h(2) - f_h(1);  // Use face spacing
+    real_t dx_right = f_h(N+1) - f_h(N);
+
+    for (int i = 1; i <= Ngl; i++) {
+        c_h(1-i) = c_h(1) - i * dx_left;
+        c_h(N+i) = c_h(N) + i * dx_right;
+    }
+}
+
+inline void oneDgridinfo::computeDifferences() {
+    // Cell differences: dc(i) = f(i+1) - f(i)
+    for (int i = 1-Ngl; i <= N+Ngl; i++) {
+        dc_h(i) = f_h(i+1) - f_h(i);
+        dc_inv_h(i) = 1.0 / dc_h(i);
+    }
+    
+    // Face differences: df(i) = c(i) - c(i-1)
+    for (int i = 2-Ngl; i <= N+Ngl; i++) {
+        df_h(i) = c_h(i) - c_h(i-1);
+    }
+    
+    // Boundary face differences
+    df_h(1-Ngl) = df_h(2-Ngl);
+    df_h(N+Ngl+1) = df_h(N+Ngl);
+    
+    // Compute inverses
+    for (int i = 1-Ngl; i <= N+Ngl+1; i++) {
+        df_inv_h(i) = 1.0 / df_h(i);
+    }
+    
+    // Find dmin
+    dmin = std::numeric_limits<real_t>::max();
+    for (int i = 1; i <= N+1; i++) {
+        dmin = std::min(dmin, df_h(i));
+    }
+}
+
+inline void oneDgridinfo::computeInterpolationMetrics() {
+    // Interpolation factor: inp(i) = (f(i) - c(i-1)) / (c(i) - c(i-1))
+    // That means, for central difference, 
+    //   east face i+1/2 uses cell i and i+1 
+    //   then phi(i+1/2) = (f(i+1) - c(i)) / (c(i+1) - c(i)) * phi(i+1) + ...
+    //                     (c(i+1) - f(i+1)) / (c(i+1) - c(i)) * phi(i) 
+    //   i.e. phi(i+1/2) = inp(i+1) * phi(i+1) + (1 - inp(i+1)) * phi(i)
+    // similaryly for west face i-1/2 uses cell i-1 and i 
+    //   then phi(i-1/2) = inp(i) * phi(i) + (1 - inp(i)) * phi(i-1) 
+    for (int i = 1-Ngl; i <= N+Ngl+1; i++) {
+        if (i >= 2-Ngl && i <= N+Ngl) {
+            inp_h(i) = (f_h(i) - c_h(i-1)) / (c_h(i) - c_h(i-1));
+        } else {
+            inp_h(i) = 0.5;  // Default for boundaries
+        }
+    }
+}
+
+inline void oneDgridinfo::uploadToDevice() {
+    // Direct copy from host to device offset views
+    Kokkos::deep_copy(c, c_h);
+    Kokkos::deep_copy(dc, dc_h);
+    Kokkos::deep_copy(dc_inv, dc_inv_h);
+    Kokkos::deep_copy(f, f_h);
+    Kokkos::deep_copy(df, df_h);
+    Kokkos::deep_copy(df_inv, df_inv_h);
+    Kokkos::deep_copy(inp, inp_h);
+}
+
+inline void oneDgridinfo::printSummary() const {
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "1D Grid Information Summary: " << varname << std::endl;
+    std::cout << "========================================" << std::endl;
+    
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "Grid Type: " << (init_option == GRID_UNIFORM ? "UNIFORM" : "NON-UNIFORM") << std::endl;
+    if (init_option == GRID_NONUNIFORM) {
+        std::cout << "Grid File: " << filename << std::endl;
+    }
+    std::cout << "Domain: [" << start << ", " << end << "]" << std::endl;
+    std::cout << "Domain Length: " << (end - start) << std::endl;
+    
+    std::cout << "\nGrid Points:" << std::endl;
+    std::cout << "  Interior cells (N): " << N << std::endl;
+    std::cout << "  Ghost layers (Ngl): " << Ngl << std::endl;
+    std::cout << "  Cell range: [" << (1-Ngl) << ", " << (N+Ngl) << "]" << std::endl;
+    std::cout << "  Face range: [" << (1-Ngl) << ", " << (N+Ngl+1) << "]" << std::endl;
+    
+    std::cout << "\nArray Extents:" << std::endl;
+    std::cout << "  Cell arrays:" << std::endl;
+    std::cout << "    c: begin=" << c_h.begin(0) << ", end=" << c_h.end(0) 
+              << ", extent=" << c_h.extent(0) 
+              << " [indices: " << c_h.begin(0) << " to " << (c_h.end(0)-1) << "]" << std::endl;
+    std::cout << "    dc: begin=" << dc_h.begin(0) << ", end=" << dc_h.end(0) 
+              << ", extent=" << dc_h.extent(0)
+              << " [indices: " << dc_h.begin(0) << " to " << (dc_h.end(0)-1) << "]" << std::endl;
+    std::cout << "  Face arrays:" << std::endl;
+    std::cout << "    f: begin=" << f_h.begin(0) << ", end=" << f_h.end(0) 
+              << ", extent=" << f_h.extent(0)
+              << " [indices: " << f_h.begin(0) << " to " << (f_h.end(0)-1) << "]" << std::endl;
+    std::cout << "    df: begin=" << df_h.begin(0) << ", end=" << df_h.end(0) 
+              << ", extent=" << df_h.extent(0)
+              << " [indices: " << df_h.begin(0) << " to " << (df_h.end(0)-1) << "]" << std::endl;
+    std::cout << "  Interpolation array:" << std::endl;
+    std::cout << "    inp: begin=" << inp_h.begin(0) << ", end=" << inp_h.end(0) 
+              << ", extent=" << inp_h.extent(0)
+              << " [indices: " << inp_h.begin(0) << " to " << (inp_h.end(0)-1) << "]" << std::endl;
+    
+    std::cout << "\nGrid Spacing:" << std::endl;
+    std::cout << "  Minimum face spacing (dmin): " << dmin << std::endl;
+    if (init_option == GRID_UNIFORM) {
+        std::cout << "  Uniform spacing (dx): " << (end - start) / N << std::endl;
+    } else {
+        // Find max spacing
+        real_t dmax = 0.0;
+        for (int i = 1; i <= N+1; i++) {
+            dmax = std::max(dmax, df_h(i));
+        }
+        std::cout << "  Maximum face spacing: " << dmax << std::endl;
+        std::cout << "  Spacing ratio (max/min): " << dmax/dmin << std::endl;
+    }
+    
+    std::cout << "\nSample Grid Points:" << std::endl;
+    std::cout << "  First interior face f[1]: " << f_h(1) << std::endl;
+    std::cout << "  Last interior face f[" << (N+1) << "]: " << f_h(N+1) << std::endl;
+    std::cout << "  First interior cell c[1]: " << c_h(1) << std::endl;
+    std::cout << "  Last interior cell c[" << N << "]: " << c_h(N) << std::endl;
+    
+    // Print ghost cells
+    std::cout << "\nGhost Cells:" << std::endl;
+    for (int i = 1; i <= Ngl; i++) {
+        std::cout << "  Left ghost: c[" << (1-i) << "] = " << c_h(1-i) 
+                  << ", f[" << (1-i) << "] = " << f_h(1-i) << std::endl;
+    }
+    for (int i = 1; i <= Ngl; i++) {
+        std::cout << "  Right ghost: c[" << (N+i) << "] = " << c_h(N+i) 
+                  << ", f[" << (N+i+1) << "] = " << f_h(N+i+1) << std::endl;
+    }
+    
+    std::cout << "\nSample Differences:" << std::endl;
+    std::cout << "  dc[1] = " << dc_h(1) << ", df[1] = " << df_h(1) << std::endl;
+    std::cout << "  dc[" << N << "] = " << dc_h(N) << ", df[" << (N+1) << "] = " << df_h(N+1) << std::endl;
+    
+    std::cout << "\nInterpolation Factors:" << std::endl;
+    std::cout << "  inp[1] = " << inp_h(1) << " (for interpolating to f[1])" << std::endl;
+    std::cout << "  inp[" << N << "] = " << inp_h(N) << " (for interpolating to f[" << N << "])" << std::endl;
+    
+    std::cout << "========================================\n" << std::endl;
+}
+
+#endif // ONEDGRIDINFO_HPP
+
+================================================================================
+File: ./INCLUDE/phasefield.cpp
+================================================================================
+
+// file: src/INCLUDE/phasefield.cpp
+#include "phasefield.hpp"
+#include "../CALCULATORS/calculators.hpp"
+#include <iostream>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <algorithm>
+#include <cmath>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+// Initialize all fields and parameters
+void PhaseField::initialize()
+{
+    // Allocate all fields
+    allocateFields();
+
+    // Compute epsilon field based on grid spacing
+    computeEpsilon(epsilon);
+
+    // Set initial condition for psi
+    setInitialConditionPsi(psi);
+
+    // Convert to phi
+    CalculateSDF2Phase(psi, epsilon, phi);
+
+    // Store initial phi
+    phi_old.deepCopy(phi);
+
+    // Set initial velocity field and compute face velocities
+    setVelocity(0.0, u, v, w, vel_f);
+
+    // Apply initial boundary conditions
+    applyBoundaryConditions(phi);
+
+    // Print initial summary
+    printSummary();
+}
+
+// Allocate all fields
+void PhaseField::allocateFields()
+{
+    // Primary fields
+    phi = Field(grid.get(), "phi");
+    phi_old = Field(grid.get(), "phi_old");
+    psi = Field(grid.get(), "psi");
+
+    // Velocity fields
+    u = Field(grid.get(), "u");
+    v = Field(grid.get(), "v");
+    w = Field(grid.get(), "w");
+    vel_mag = Field(grid.get(), "vel_mag");
+
+    // Parameter field
+    epsilon = Field(grid.get(), "epsilon");
+
+    // Normal vector fields
+    normx = Field(grid.get(), "normx");
+    normy = Field(grid.get(), "normy");
+    normz = Field(grid.get(), "normz");
+
+    // Face values
+    phi_f = Face(grid.get(), "phi_f");
+    phi_diff_f = Face(grid.get(), "phi_diff_f"); // Add this
+    psi_f = Face(grid.get(), "psi_f");
+    epsilon_f = Face(grid.get(), "epsilon_f");
+    norm_f = Face(grid.get(), "norm_f");
+    vel_f = Face(grid.get(), "vel_f");
+
+    // Terms
+    Conv = Field(grid.get(), "Conv");
+    Diff = Field(grid.get(), "Diff");
+    Sharp = Field(grid.get(), "Sharp");
+    RHS = Field(grid.get(), "RHS");
+}
+
+// Upload all fields to device
+void PhaseField::uploadToDevice()
+{
+    phi.upload();
+    phi_old.upload();
+    psi.upload();
+    u.upload();
+    v.upload();
+    w.upload();
+    vel_mag.upload();
+    epsilon.upload();
+    normx.upload();
+    normy.upload();
+    normz.upload();
+    Conv.upload();
+    Diff.upload();
+    Sharp.upload();
+    RHS.upload();
+}
+
+// Download only fields needed for output
+void PhaseField::downloadFromDevice()
+{
+    phi.download();
+    psi.download();
+    u.download();
+    v.download();
+    w.download();
+}
+
+// Compute epsilon field based on grid spacing
+void PhaseField::computeEpsilon(Field &epsilon_field)
+{
+    auto eps_d = epsilon_field.u;
+    auto FullPolicy = grid->full_policy; 
+
+    auto dc_x = grid->xgrid->dc;
+    auto dc_y = grid->ygrid->dc;
+    auto dc_z = grid->zgrid->dc;
+
+    const real_t eps_fac = epsilon_fac;
+
+    Kokkos::parallel_for("ComputeEpsilon", FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) {
+#ifdef USE_2D
+            real_t max_spacing = Kokkos::max(dc_x(i), dc_y(j));
+#else
+            real_t max_spacing = Kokkos::max(Kokkos::max(dc_x(i), dc_y(j)), dc_z(k));
+#endif
+            eps_d(i, j, k) = eps_fac * max_spacing; });
+}
+
+// Set initial condition for psi
+void PhaseField::setInitialConditionPsi(Field &psi_field)
+{
+    auto psi_d = psi_field.u;
+    auto FullPolicy = grid->full_policy;
+
+    auto xc = grid->xgrid->c;
+    auto yc = grid->ygrid->c;
+    auto zc = grid->zgrid->c;
+
+    const real_t x0_local = x0;
+    const real_t y0_local = y0;
+    const real_t z0_local = z0;
+    const real_t r0_local = r0;
+    const int mode_local = init_mode;
+
+    Kokkos::parallel_for("SetInitialPsi", FullPolicy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) {
+            real_t x = xc(i);
+            real_t y = yc(j);
+            real_t z = zc(k);
+            
+            // Distance from center
+            real_t dist = Kokkos::sqrt((x-x0_local)*(x-x0_local) + 
+                                       (y-y0_local)*(y-y0_local) + 
+                                       (z-z0_local)*(z-z0_local));
+            
+            // Signed distance based on mode
+            if (mode_local == 0) {
+                // Mode 0: positive inside
+                psi_d(i, j, k) = r0_local - dist;
+            } else {
+                // Mode 1: negative inside
+                psi_d(i, j, k) = dist - r0_local;
+            } });
+}
+
+// Set velocity field and compute face velocities
+void PhaseField::setVelocity(real_t t, Field &u_field, Field &v_field,
+                             Field &w_field, Face &vel_face)
+{
+    auto u_d = u_field.u;
+    auto v_d = v_field.u;
+    auto w_d = w_field.u;
+
+    auto FullPolicy = grid->full_policy;
+
+    auto xc = grid->xgrid->c;
+    auto yc = grid->ygrid->c;
+    auto zc = grid->zgrid->c;
+
+    // Time period for velocity field
+    const real_t T = 4.0; // Adjust as needed
+
+    // Deformation velocity field
+    Kokkos::parallel_for("SetVelocity", FullPolicy, KOKKOS_LAMBDA(const int i, const int j, const int k) {
+            real_t x = xc(i);
+            real_t y = yc(j);
+#ifndef USE_2D
+            real_t z = zc(k);
+#endif
+            
+            // Deformation velocity field
+            const real_t pi = M_PI;
+            real_t cos_time = cos(pi * t / T);
+            
+            u_d(i, j, k) = -sin(pi * x) * sin(pi * x) * sin(2.0 * pi * y) * cos_time;
+            v_d(i, j, k) = sin(2.0 * pi * x) * sin(pi * y) * sin(pi * y) * cos_time;
+            w_d(i, j, k) = 0.0; });
+
+    // Compute face velocities
+    CalculateFaceVals(u_field, v_field, w_field, vel_face);
+}
+
+// Get maximum velocity magnitude
+real_t PhaseField::getMaxVelocity(Field &u_field, Field &v_field,
+                                  Field &w_field, Field &vel_mag_field)
+{
+    // Use CalculateAbsoluteValue for vector field
+    CalculateAbsoluteValue(u_field, v_field, w_field, vel_mag_field);
+
+    // Use CalculateMaxMagnitude to get the maximum
+    real_t max_vel;
+    CalculateMaxMagnitude(vel_mag_field, max_vel);
+
+    return max_vel;
+}
+
+// Interpolate fields to faces
+void PhaseField::interpolateToFaces(Field &phi_field, Field &psi_field,
+                                    Field &epsilon_field,
+                                    Field &normx_field, Field &normy_field,
+                                    Field &normz_field,
+                                    Face &phi_face, Face &psi_face, Face &epsilon_face, Face &norm_face)
+{
+    // Interpolate phi to faces
+    CalculateFaceVals(phi_field, phi_face);
+
+    // Interpolate psi to faces
+    CalculateFaceVals(psi_field, psi_face);
+
+    // Interpolate epsilon to faces
+    CalculateFaceVals(epsilon_field, epsilon_face);
+
+    // Interpolate normals to faces
+    CalculateFaceVals(normx_field, normy_field, normz_field, norm_face);
+}
+
+// Compute normal vectors from psi
+void PhaseField::computeNormals(Field &psi_field,
+                                Field &normx_out, Field &normy_out, Field &normz_out)
+{
+    // Compute gradients of psi directly into the normal arrays
+    CalculateGradients(psi_field, normx_out, normy_out, normz_out);
+
+    // Normalize in-place to get unit normals
+    CalculateNormals(normx_out, normy_out, normz_out);
+}
+
+// Compute RHS = -Conv + Gamma*Diff - Gamma*Sharp
+void PhaseField::computeRHS(Field &phi_field, Face &phi_face, Face &psi_face,
+                            Face &epsilon_face, Face &norm_face, Face &vel_face,
+                            Field &Conv_out, Field &Diff_out, Field &Sharp_out,
+                            Field &RHS_out)
+{
+    // Compute convection term: div(u*phi)
+    CalculateConvection(phi_face, vel_face, Conv_out);
+
+    // Compute face differences for phi (gradients at faces)
+    CalculateFaceDiffs(phi_field, phi_diff_f);
+
+    // Compute diffusion term: div(epsilon*grad(phi))
+    CalculateDiffusion(phi_diff_f, epsilon_face, Diff_out);
+
+    // Compute sharpening term: div((1/4)*[1-tanh²(psi/2eps)]*normal)
+    CalculateSharpening(psi_face, norm_face, epsilon_face, Sharp_out);
+
+    // Combine terms with proper signs and Gamma
+    auto grid_local = grid.get();
+    auto interior_policy = grid_local->interior_policy;
+
+    auto Conv_d = Conv_out.u;
+    auto Diff_d = Diff_out.u;
+    auto Sharp_d = Sharp_out.u;
+    auto RHS_d = RHS_out.u;
+    const real_t Gamma_local = Gamma;
+
+    Kokkos::parallel_for("ComputeRHS", 
+        interior_policy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) 
+        { 
+            RHS_d(i, j, k) =
+                     - Conv_d(i, j, k) 
+                     + Gamma_local * Diff_d(i, j, k) 
+                     - Gamma_local * Sharp_d(i, j, k); 
+        });
+
+    Kokkos::fence();
+}
+
+// Update phi using Euler explicit
+void PhaseField::updatePhi(Field &phi_field, Field &RHS_field, real_t dt_local)
+{
+    auto phi_d = phi_field.u;
+    auto RHS_d = RHS_field.u;
+
+    
+    auto interior_policy = grid->interior_policy;
+    Kokkos::parallel_for("UpdatePhi", interior_policy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k) 
+        { phi_d(i, j, k) = phi_d(i, j, k) + dt_local * RHS_d(i, j, k); });
+
+    Kokkos::fence();
+
+    // Apply boundary conditions
+    applyBoundaryConditions(phi_field);
+}
+
+// Main time stepping function
+// Main time stepping function
+void PhaseField::advanceTimeStep()
+{
+    // Store old phi (only deepCopy we need)
+    phi_old.deepCopy(phi);
+
+    // Update velocity field for current time
+    setVelocity(time, u, v, w, vel_f);
+
+    // Convert phi to psi
+    CalculatePhaseToSdf(phi, epsilon, psi);
+
+    // Compute normals directly from psi
+    computeNormals(psi, normx, normy, normz);
+
+    // Interpolate fields to faces
+    interpolateToFaces(phi, psi, epsilon, normx, normy, normz, phi_f, psi_f, epsilon_f, norm_f);
+
+    // Compute RHS
+    computeRHS(phi, phi_f, psi_f, epsilon_f, norm_f, vel_f, Conv, Diff, Sharp, RHS);
+
+    // Update phi
+    updatePhi(phi, RHS, dt);
+
+    // Update time and step
+    time += dt;
+    step++;
+}
+
+// Apply boundary conditions
+void PhaseField::applyBoundaryConditions(Field &field)
+{
+    CalculateBoundaryValues(field, BC);
+}
+
+// Check if phi is bounded between 0 and 1
+void PhaseField::checkBounds(Field &phi_field)
+{
+    auto phi_d = phi_field.u;
+
+    auto interior_policy = grid->interior_policy;
+
+    real_t min_val, max_val;
+
+    Kokkos::parallel_reduce("CheckBounds", interior_policy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k, real_t &lmin, real_t &lmax) {
+            lmin = Kokkos::min(lmin, phi_d(i, j, k));
+            lmax = Kokkos::max(lmax, phi_d(i, j, k)); 
+        }, Kokkos::Min<real_t>(min_val), Kokkos::Max<real_t>(max_val));
+
+    if (min_val < -0.01 || max_val > 1.01)
+    {
+        std::cout << "WARNING: Phi out of bounds! Min: " << min_val << ", Max: " << max_val << std::endl;
+    }
+}
+
+// Compute total mass (integral of phi)
+real_t PhaseField::computeMass(Field &phi_field)
+{
+    auto phi_d = phi_field.u;
+    auto Vols = grid->Vols;
+
+    auto interior_policy = grid->interior_policy;
+
+    real_t total_mass = 0.0;
+
+    Kokkos::parallel_reduce("ComputeMass", interior_policy, 
+        KOKKOS_LAMBDA(const int i, const int j, const int k, real_t &mass) 
+        { 
+            mass += phi_d(i, j, k) * Vols(i, j, k); 
+        }, 
+        Kokkos::Sum<real_t>(total_mass));
+        
+    return total_mass;
+}
+
+// Print summary
+void PhaseField::printSummary()
+{
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "Phase Field Solver Summary" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "Grid: " << grid->xgrid->N << " x " << grid->ygrid->N << " x " << grid->zgrid->N << std::endl;
+    std::cout << "Ghost layers: " << grid->xgrid->Ngl << std::endl;
+    std::cout << "Time step: " << dt << std::endl;
+    std::cout << "Epsilon factor: " << epsilon_fac << std::endl;
+    std::cout << "Gamma: " << Gamma << std::endl;
+    std::cout << "Initial condition: Circle at (" << x0 << ", " << y0 << ", " << z0 << ") with radius " << r0 << std::endl;
+    std::cout << "Mode: " << (init_mode == 0 ? "Positive inside" : "Negative inside") << std::endl;
+    std::cout << "========================================\n"
+              << std::endl;
+}
+
+// Print diagnostics
+void PhaseField::printDiagnostics()
+{
+    psi.download();
+    real_t mass = computeMass(phi);
+    real_t max_vel = getMaxVelocity(u, v, w, vel_mag);
+    std::cout << "Step: " << std::setw(6) << step
+              << " | Time: " << std::setw(10) << std::setprecision(6) << time
+              << " | Mass: " << std::setw(12) << std::setprecision(8) << mass
+              << " | Max vel: " << std::setw(10) << std::setprecision(6) << max_vel
+              << "\n";
+    checkBounds(phi);
+}
+
+// Write Tecplot output with automatic filename
+void PhaseField::writeTecplot()
+{
+    // Format: phase.XXXXXXX.dat where X is zero-padded step number
+    std::ostringstream filename;
+    filename << "phase." << std::setfill('0') << std::setw(7) << step << ".dat";
+    downloadFromDevice();
+
+#ifdef USE_2D
+    writeTecplot2D(filename.str());
+#else
+    writeTecplot3D(filename.str());
+#endif
+}
+
+// Write 2D Tecplot output
+void PhaseField::writeTecplot2D(const std::string &filename)
+{
+    // Create TECOUT directory if it doesn't exist
+    mkdir("TECOUT", 0755);
+
+    std::string fullpath = "TECOUT/" + filename;
+    std::ofstream tecout(fullpath);
+
+    if (!tecout.is_open())
+    {
+        std::cerr << "Error: Cannot open output file '" << fullpath << "'\n";
+        return;
+    }
+
+    tecout << "Title = \"Phase Field 2D\" \n";
+    tecout << "Variables = \"X\", \"Y\", \"Phi\", \"Psi\", \"U\", \"V\" \n";
+    tecout << "Zone T=\"Step " << step << "\", I=" << grid->xgrid->N
+           << ", J=" << grid->ygrid->N << ", F=POINT \n";
+
+    // Write data
+    for (int j = 1; j <= grid->ygrid->N; j++)
+    {
+        for (int i = 1; i <= grid->xgrid->N; i++)
+        {
+            tecout << std::scientific << std::setprecision(8)
+                   << grid->xgrid->c_h(i) << " "
+                   << grid->ygrid->c_h(j) << " "
+                   << phi.u_h(i, j, 1) << " "
+                   << psi.u_h(i, j, 1) << " "
+                   << u.u_h(i, j, 1) << " "
+                   << v.u_h(i, j, 1) << "\n";
+        }
+    }
+
+    tecout.close();
+}
+
+// Write 3D Tecplot output
+void PhaseField::writeTecplot3D(const std::string &filename)
+{
+    // Create TECOUT directory if it doesn't exist
+    mkdir("TECOUT", 0755);
+
+    std::string fullpath = "TECOUT/" + filename;
+    std::ofstream tecout(fullpath);
+
+    if (!tecout.is_open())
+    {
+        std::cerr << "Error: Cannot open output file '" << fullpath << "'\n";
+        return;
+    }
+
+    tecout << "Title = \"Phase Field 3D\" \n";
+    tecout << "Variables = \"X\", \"Y\", \"Z\", \"Phi\", \"Psi\", \"U\", \"V\", \"W\" \n";
+    tecout << "Zone T=\"Step " << step << "\", I=" << grid->xgrid->N
+           << ", J=" << grid->ygrid->N
+           << ", K=" << grid->zgrid->N << ", F=POINT \n";
+
+    // Write data
+    for (int k = 1; k <= grid->zgrid->N; k++)
+    {
+        for (int j = 1; j <= grid->ygrid->N; j++)
+        {
+            for (int i = 1; i <= grid->xgrid->N; i++)
+            {
+                tecout << std::scientific << std::setprecision(8)
+                       << grid->xgrid->c_h(i) << " "
+                       << grid->ygrid->c_h(j) << " "
+                       << grid->zgrid->c_h(k) << " "
+                       << phi.u_h(i, j, k) << " "
+                       << psi.u_h(i, j, k) << " "
+                       << u.u_h(i, j, k) << " "
+                       << v.u_h(i, j, k) << " "
+                       << w.u_h(i, j, k) << "\n";
+            }
+        }
+    }
+
+    tecout.close();
+}
+
+================================================================================
+File: ./INCLUDE/phasefield.hpp
+================================================================================
+
+// file: src/INCLUDE/phasefield.hpp
+#ifndef PHASEFIELD_HPP
+#define PHASEFIELD_HPP
+
+#include "include.hpp"
+#include "inputreader.hpp"
+#include <string>
+
+class PhaseField {
+public:
+    // Grid (owned by PhaseField)
+    std::unique_ptr<GridInfo> grid;
+    
+    // Input parameters
+    InputParams params;
+    
+    // Boundary conditions
+    bctype BC;
+    
+    // Time stepping parameters
+    real_t dt;          // Time step
+    real_t time;        // Current simulation time
+    int step;           // Current time step number
+    
+    // ACDI parameters
+    Field epsilon;  // Interface thickness (space-varying based on grid)
+    real_t epsilon_fac;     // Factor for interface thickness
+    real_t Gamma;           // Mobility parameter (Gamma = gamma_fac for now)
+    real_t gamma_fac;       // Factor for Gamma calculation
+    
+    // Initial condition parameters (from input)
+    real_t x0, y0, z0;      // Center coordinates
+    real_t r0;              // Radius
+    int init_mode;          // 0: psi positive inside, 1: psi negative inside
+    
+    // Primary fields
+    Field phi;      // Phase field [0,1]
+    Field phi_old;  // Old phase field (for diagnostics)
+    Field psi;      // Signed distance function
+    
+    // Velocity fields
+    Field u;        // x-velocity
+    Field v;        // y-velocity
+    Field w;        // z-velocity
+    Field vel_mag;  // Velocity magnitude (for computing max velocity)
+    
+    // Normal vector fields (also used for psi gradients temporarily)
+    Field normx;    // Normal x-component
+    Field normy;    // Normal y-component
+    Field normz;    // Normal z-component
+    
+    // Face values
+    Face phi_f;         // Phase field at faces (interpolated values)
+    Face phi_diff_f;    // Phase field gradients at faces (for diffusion)
+    Face psi_f;         // SDF at faces
+    Face epsilon_f;     // Epsilon at faces
+    Face norm_f;        // Normal vectors at faces
+    Face vel_f;         // Velocity field at faces    
+    // Terms (not fluxes!)
+    Field Conv;     // Convection term: div(u*phi)
+    Field Diff;     // Diffusion term: div(epsilon*grad(phi))
+    Field Sharp;    // Sharpening term: div((1/4)*[1-tanh²(psi/2eps)]*normal)
+    Field RHS;      // Right hand side: -Conv + Gamma*Diff - Gamma*Sharp
+    
+    // RAII Constructor
+    PhaseField(const InputParams& params_in, const gridconfig& grid_config);
+    
+    // Destructor
+    ~PhaseField() = default;
+    
+    // Main initialization function
+    void initialize();
+    
+    // Memory management
+    void allocateFields();      // Allocate all fields
+    
+    // Data transfer
+    void uploadToDevice();      // Upload all fields to device
+    void downloadFromDevice();  // Download only output fields from device
+    
+    // Set initial condition for psi (circle/sphere)
+    void setInitialConditionPsi(Field& psi_field);
+    
+    // Parameter computation
+    void computeEpsilon(Field& epsilon_field);
+    
+    // Set velocity field and compute face velocities
+    void setVelocity(real_t t, Field& u_field, Field& v_field, 
+                     Field& w_field, Face& vel_face);
+    
+    // Core solver steps
+    void interpolateToFaces(Field& phi_field, Field& psi_field,
+                           Field& epsilon_field, 
+                           Field& normx_field, Field& normy_field, 
+                           Field& normz_field,
+                           Face& phi_face, Face& psi_face, Face& epsilon_face, Face& norm_face);
+    
+    void computeNormals(Field& psi_field,
+                       Field& normx_out, Field& normy_out, Field& normz_out);
+    
+    void computeRHS(Field& phi_field, Face& phi_face, Face& psi_face,
+                   Face& epsilon_face, Face& norm_face, Face& vel_face,
+                   Field& Conv_out, Field& Diff_out, Field& Sharp_out,
+                   Field& RHS_out);
+    
+    void updatePhi(Field& phi_field, Field& RHS_field, real_t dt_local);
+    
+    // Main time stepping function
+    void advanceTimeStep();
+    
+    // Apply boundary conditions
+    void applyBoundaryConditions(Field& field);
+    
+    // Utilities
+    void checkBounds(Field& phi_field);
+    real_t computeMass(Field& phi_field);
+    real_t getMaxVelocity(Field& u_field, Field& v_field, 
+                         Field& w_field, Field& vel_mag_field);
+    
+    // Output functions
+    void printSummary();
+    void printDiagnostics();
+    void writeTecplot();  // Writes phase.XXXXXXX.dat format
+    
+private:
+    void writeTecplot2D(const std::string& filename);
+    void writeTecplot3D(const std::string& filename);
+
+};
+
+// Constructor implementation
+inline PhaseField::PhaseField(const InputParams& params_in, const gridconfig& grid_config) 
+    : grid(std::make_unique<GridInfo>(grid_config)),
+      params(params_in),
+      BC(params.toBCType()),
+      dt(params.dt),
+      time(0.0),
+      step(params.nstart),
+      epsilon(grid.get(), "epsilon"),
+      epsilon_fac(params.epsilon_fac),
+      Gamma(params.gamma_fac),
+      gamma_fac(params.gamma_fac),
+      x0(params.x0),
+      y0(params.y0),
+      z0(params.z0),
+      r0(params.radius),
+      init_mode(params.mode),
+      phi(grid.get(), "phi"),
+      phi_old(grid.get(), "phi_old"),
+      psi(grid.get(), "psi"),
+      u(grid.get(), "u"),
+      v(grid.get(), "v"), 
+      w(grid.get(), "w"),
+      vel_mag(grid.get(), "vel_mag"),
+      normx(grid.get(), "normx"),
+      normy(grid.get(), "normy"),
+      normz(grid.get(), "normz"),
+      phi_f(grid.get(), "phi_f"),
+      phi_diff_f(grid.get(), "phi_diff_f"),  // Add this
+      psi_f(grid.get(), "psi_f"),
+      epsilon_f(grid.get(), "epsilon_f"),
+      norm_f(grid.get(), "norm_f"),
+      vel_f(grid.get(), "vel_f"),
+      Conv(grid.get(), "Conv"),
+      Diff(grid.get(), "Diff"),
+      Sharp(grid.get(), "Sharp"),
+      RHS(grid.get(), "RHS")
+{
+    initialize();
+}
+
+
+#endif // PHASEFIELD_HPP
+
+================================================================================
+File: ./INCLUDE/structs.hpp
+================================================================================
+
+// file: src/INCLUDE/structs.hpp
+#ifndef TYPES_H
+#define TYPES_H
+
+#include <Kokkos_Core.hpp>
+#include <stdbool.h>
+#include <cfloat>
+#include <cmath>
+#include <cstdint>
+
+// Define precision based on compiler flag
+#ifdef USE_DOUBLE
+    typedef double real_t;
+    #define REAL_MAX 1.0e10
+    #define REAL_MIN -1.0e10
+    #define REAL_EPSILON 1e-16
+#else
+    typedef float real_t;
+    #define REAL_MAX 1.0e5
+    #define REAL_MIN -1.0e5
+    #define REAL_EPSILON 1e-8
+#endif
+
+// Math functions that adapt to precision
+#ifdef USE_DOUBLE
+    #define SQRT(x) sqrt(x)
+    #define SIN(x) sin(x)
+    #define COS(x) cos(x)
+    #define EXP(x) exp(x)
+    #define LOG(x) log(x)
+    #define POW(x,y) pow(x,y)
+    #define FABS(x) fabs(x)
+#else
+    #define SQRT(x) sqrtf(x)
+    #define SIN(x) sinf(x)
+    #define COS(x) cosf(x)
+    #define EXP(x) expf(x)
+    #define LOG(x) logf(x)
+    #define POW(x,y) powf(x,y)
+    #define FABS(x) fabsf(x)
+#endif
+
+// Constants
+#ifdef USE_DOUBLE
+    #define PI 3.14159265358979323846
+    #define ZERO 0.0
+    #define ONE 1.0
+    #define TWO 2.0
+#else
+    #define PI 3.14159265358979323846f
+    #define ZERO 0.0f
+    #define ONE 1.0f
+    #define TWO 2.0f
+#endif
+
+// Constants
+#define MAX_THREADS 256 // Can be used for Kokkos team size
+
+// Initialization types
+#define INIT_ZERO 0
+#define INIT_MANUFACTURED 1
+#define INIT_RANDOM 2
+
+// RHS types
+#define RHS_ZERO 0
+#define RHS_MANUFACTURED 1
+#define RHS_CUSTOM 2
+
+// Dirichlet BC specifier
+#define BCD_USER_SPECIFIED 1
+#define BCD_MANUFACTURED 2
+
+// Method types
+#define METHOD_JACOBI 1
+#define METHOD_SRJ 2
+#define METHOD_BICGSTAB 3
+#define METHOD_MULTIGRID 4
+
+// Simulation type string for file naming
+#define SIMTYPE "kokkos"
+
+// Grid Types
+// Grid type defines
+#define GRID_UNIFORM 0
+#define GRID_NONUNIFORM 1
+
+#endif // TYPES_H
+
+================================================================================
+File: ./main.cpp
+================================================================================
+
+// file: src/main.cpp
+#include "INCLUDE/phasefield.hpp"
+#include "INCLUDE/inputreader.hpp"
+#include <Kokkos_Core.hpp>
+#include <iostream>
+
+int main(int argc, char* argv[]) {
+    Kokkos::initialize(argc, argv);
+    {
+        // Read input
+        InputParams params = InputReader::readInputFile("input.dat");
+        InputReader::printParams(params);
+        
+        // Create grid configuration
+        gridconfig grid_config = params.toGridConfig();
+        
+        // Create phase field solver
+        PhaseField pf(params, grid_config);
+        
+        // Time stepping loop
+        for (int n = params.nstart; n <= params.nend; n++) {
+            // Output at first step and then at intervals
+            if (n == params.nstart || n % params.nprint == 0) {
+                pf.printDiagnostics();
+            }
+            
+            if (n == params.nstart || n % params.ndump == 0) {
+                pf.downloadFromDevice();  // Download fields for output
+                std::string filename = "phi_" + std::to_string(n) + ".dat";
+                pf.writeTecplot();
+            }
+            
+            // Advance one time step
+            if (n < params.nend) {  // Don't advance past final time
+                pf.advanceTimeStep();
+            }
+        }
+        
+        // Final output
+        std::cout << "\nSimulation completed successfully!" << std::endl;
+    }
+    Kokkos::finalize();
+    return 0;
+}
+
+================================================================================
+File: ./test.cpp
+================================================================================
+
+// file: src/test.cpp
+#include "INCLUDE/include.hpp"
+#include "CALCULATORS/calculators.hpp"
+#include <iostream>
+#include <iomanip>
+
+int main(int argc, char *argv[])
+{
+    Kokkos::initialize(argc, argv);
+    {
+        std::cout << "=== Testing All Calculator Functions ===\n\n";
+
+        // Create a simple test grid
+        gridconfig config;
+        config.Ngl = 1;
+        config.Nx = 32;
+        config.Ny = 32;
+        config.Nz = 32;
+        config.x_start = 0.0;
+        config.x_end = 1.0;
+        config.y_start = 0.0;
+        config.y_end = 1.0;
+        config.z_start = 0.0;
+        config.z_end = 1.0;
+        config.x_option = GRID_UNIFORM;
+        config.y_option = GRID_UNIFORM;
+        config.z_option = GRID_UNIFORM;
+
+        GridInfo grid(config);
+
+        // Test 1: Field initialization and basic operations
+        std::cout << "Test 1: Field initialization\n";
+        Field phi(&grid, "phi");
+        phi.fill(1.0);
+        phi.upload();
+        phi.download();
+        auto xc = grid.xgrid->c;
+        auto yc = grid.ygrid->c;
+        auto zc = grid.zgrid->c;
+        auto u = phi.u;
+        int Nx = config.Nx, Ny = config.Ny, Nz = config.Nz, Ngl = config.Ngl;
+        
+        // Define test point
+        #ifndef USE_2D
+        int i_test = static_cast<int>(std::floor(Nx / 2.0));
+        int j_test = static_cast<int>(std::floor(Ny / 2.0));
+        int k_test = static_cast<int>(std::floor(Nz / 2.0));
+        #else
+        int i_test = static_cast<int>(std::floor(Nx / 2.0));
+        int j_test = static_cast<int>(std::floor(Ny / 2.0));
+        int k_test = 1;
+        #endif
+        
+        std::cout << "  Test point: (" << i_test << ", " << j_test << ", " << k_test << ")\n";
+
+        std::cout << "  phi initialized to 1.0\n";
+        std::cout << "  Sample value at test point: " << phi.u_h(i_test, j_test, k_test) << "\n";
+        std::cout << "     phi range check:\n";
+        std::cout << "       phi(0, j_test, k_test) = " << phi.u_h(0, j_test, k_test) << "\n";
+        std::cout << "       phi(1, j_test, k_test) = " << phi.u_h(1, j_test, k_test) << "\n";
+        std::cout << "       phi(Nx, j_test, k_test) = " << phi.u_h(Nx, j_test, k_test) << "\n";
+        std::cout << "       phi(Nx+1, j_test, k_test) = " << phi.u_h(Nx+1, j_test, k_test) << "\n";
+
+        // Test 2: CalculateGradients
+        std::cout << "\nTest 2: CalculateGradients\n";
+        Field phi_x(&grid, "phi_x");
+        Field phi_y(&grid, "phi_y");
+        Field phi_z(&grid, "phi_z");
+
+        // Create a test field with known gradient: phi = x + 2*y + 3*z
+        std::cout << "\n     Initializing phi = x + 2*y + 3*z \n";
+        std::cout << "     Grid info: Nx=" << Nx << " Ny=" << Ny << " Nz=" << Nz << " Ngl=" << Ngl << "\n";
+        std::cout << "     Using proper grid bounds from oneDgridinfo:\n";
+        std::cout << "       x: bs=" << grid.xgrid->bs << " be=" << grid.xgrid->be << "\n";
+        std::cout << "       y: bs=" << grid.ygrid->bs << " be=" << grid.ygrid->be << "\n";
+        std::cout << "       z: bs=" << grid.zgrid->bs << " be=" << grid.zgrid->be << "\n";
+        // Before the parallel_for, verify coordinates on host
+        std::cout << "xc(1) = " << grid.xgrid->c_h(1) << "\n";
+        std::cout << "xc(Nx/2) = " << grid.xgrid->c_h(Nx / 2) << "\n";
+        std::cout << "yc(1) = " << grid.ygrid->c_h(1) << "\n";
+        std::cout << "yc(Ny/2) = " << grid.ygrid->c_h(Ny / 2) << "\n";
+        // Use proper bounds from oneDgridinfo
+        auto interior_policy = grid.interior_policy;
+        auto FullPolicy = grid.full_policy;
+
+        // Check if simple constant fill works
+        phi.download();
+        std::cout << "     Before any parallel_for: phi(1, Ny/2, 1) = " << phi.u_h(1, Ny / 2, 1) << "\n";
+
+        // Initialize phi with coordinates
+        auto xc_device = grid.xgrid->c;
+        auto yc_device = grid.ygrid->c;
+        auto zc_device = grid.zgrid->c;
+        
+        std::cout << "     Starting parallel_for with coordinates...\n";
+        Kokkos::parallel_for("TEST_Field_Init_Gradient",
+        FullPolicy,
+        KOKKOS_LAMBDA(const int i, const int j, const int k) {
+                #ifndef USE_2D
+                phi.u(i,j,k) = xc_device(i) + 2.0*yc_device(j) + 3.0*zc_device(k);
+                #else
+                phi.u(i,j,k) = xc_device(i) + 2.0*yc_device(j);
+                #endif
+            });
+        Kokkos::fence();
+        phi.download();
+        
+        std::cout << "\n     phi = x + 2*y + 3*z initialized \n";
+        std::cout << "     phi at test point: " << phi.u_h(i_test, j_test, k_test) << "\n";
+        #ifndef USE_2D
+        std::cout << "     Expected: " << (grid.xgrid->c_h(i_test) + 2.0*grid.ygrid->c_h(j_test) + 3.0*grid.zgrid->c_h(k_test)) << "\n";
+        #else
+        std::cout << "     Expected: " << (grid.xgrid->c_h(i_test) + 2.0*grid.ygrid->c_h(j_test)) << "\n";
+        #endif
+
+        // Apply boundary conditions to fill ghost cells
+        bctype BC;
+        BC.W = BC_PERIODIC;
+        BC.E = BC_PERIODIC;
+        BC.S = BC_PERIODIC;
+        BC.N = BC_PERIODIC;
+        BC.B = BC_PERIODIC;
+        BC.F = BC_PERIODIC;
+        BC.W_val = 0.0;
+        BC.E_val = 0.0;
+        BC.S_val = 0.0;
+        BC.N_val = 0.0;
+        BC.B_val = 0.0;
+        BC.F_val = 0.0;
+        CalculateBoundaryValues(phi, BC);
+        
+        std::cout << "\n     Now calculate grad(phi)=(phi_x, phi_y, phi_z) \n";
+        CalculateGradients(phi, phi_x, phi_y, phi_z);
+        phi_x.download();
+        phi_y.download();
+        phi_z.download();
+
+        std::cout << "  Expected gradients: dphi/dx=1.0, dphi/dy=2.0, dphi/dz=3.0\n";
+        std::cout << "  Sample values at center:\n";
+        std::cout << "    dphi/dx = " << phi_x.u_h(6, 6, 1) << "\n";
+        std::cout << "    dphi/dy = " << phi_y.u_h(6, 6, 1) << "\n";
+        std::cout << "    dphi/dz = " << phi_z.u_h(6, 6, 1) << "\n";
+
+        // Test 3: CalculateDivergence
+        std::cout << "\nTest 3: CalculateDivergence\n";
+        Field div(&grid, "divergence");
+        CalculateDivergence(phi_x, phi_y, phi_z, div);
+        div.download();
+        std::cout << "  Expected divergence: 0.0 (constant gradients)\n";
+        std::cout << "  Calculated divergence at test point: " << div.u_h(i_test, j_test, k_test) << "\n";
+
+        // Test 4: CalculateFaceVals (scalar)
+        std::cout << "\nTest 4: CalculateFaceVals (scalar)\n";
+        phi.fill(5.0);
+        phi.upload();
+        Face phi_f(&grid, "phi_face");
+        CalculateFaceVals(phi, phi_f);
+        phi_f.download();
+        std::cout << "  Input field phi = 5.0 everywhere\n";
+        std::cout << "  Face values at test point:\n";
+        std::cout << "    East face:  " << phi_f.E.u_h(i_test, j_test, k_test) << "\n";
+        std::cout << "    North face: " << phi_f.N.u_h(i_test, j_test, k_test) << "\n";
+
+        // Test 5: CalculateFaceVals (vector)
+        std::cout << "\nTest 5: CalculateFaceVals (vector)\n";
+        Field vx(&grid, "vx"), vy(&grid, "vy"), vz(&grid, "vz");
+        vx.fill(1.0);
+        vy.fill(2.0);
+        vz.fill(3.0);
+        vx.upload();
+        vy.upload();
+        vz.upload();
+        Face vel_f(&grid, "vel_face");
+        CalculateFaceVals(vx, vy, vz, vel_f);
+        vel_f.download();
+        std::cout << "  Input: vx=1.0, vy=2.0, vz=3.0\n";
+        std::cout << "  East face velocity at test point: " << vel_f.E.u_h(i_test, j_test, k_test) << "\n";
+
+        // Test 6: CalculateFaceDiffs
+        std::cout << "\nTest 6: CalculateFaceDiffs\n";
+        Face phi_diff(&grid, "phi_diff");
+        CalculateFaceDiffs(phi, phi_diff);
+        phi_diff.download();
+        std::cout << "  Differences of constant field (should be ~0):\n";
+        std::cout << "    East diff:  " << phi_diff.E.u_h(i_test, j_test, k_test) << "\n";
+        std::cout << "    North diff: " << phi_diff.N.u_h(i_test, j_test, k_test) << "\n";
+
+        // Test 7: CalculateDivergence (Face version)
+        std::cout << "\nTest 7: CalculateDivergence (Face)\n";
+        Field div_face(&grid, "div_face");
+        CalculateDivergence(vel_f, div_face);
+        div_face.download();
+        std::cout << "  Divergence of constant velocity field (should be ~0):\n";
+        std::cout << "    div at test point: " << div_face.u_h(i_test, j_test, k_test) << "\n";
+
+        // Test 8: CalculateNormals
+        std::cout << "\nTest 8: CalculateNormals\n";
+        // Create a spherical interface at center
+        auto u_phi = phi.u;
+        real_t xc_val = 0.5, yc_val = 0.5;
+#ifndef USE_2D
+        real_t zc_val = 0.5;
+#endif
+        Kokkos::parallel_for("InitSphere", FullPolicy, 
+            KOKKOS_LAMBDA(const int i, const int j, const int k) {
+            real_t dx = xc(i) - xc_val;
+            real_t dy = yc(j) - yc_val;
+#ifndef USE_2D
+            real_t dz = zc(k) - zc_val;
+            u_phi(i, j, k) = Kokkos::sqrt(dx * dx + dy * dy + dz * dz) - 0.2;
+#else
+            u_phi(i, j, k) = Kokkos::sqrt(dx * dx + dy * dy) - 0.2;
+#endif
+        });
+        Kokkos::fence();
+
+        Field norm_x(&grid, "norm_x"), norm_y(&grid, "norm_y"), norm_z(&grid, "norm_z");
+        CalculateGradients(phi, norm_x, norm_y, norm_z);
+        CalculateNormals(norm_x, norm_y, norm_z);
+        norm_x.download();
+        norm_y.download();
+        norm_z.download();
+        std::cout << "  Normals for sphere at (0.5, 0.5, 0.5), radius 0.2\n";
+        std::cout << "  Normal components at (0.7, 0.5, 0.5) - should point in +x:\n";
+        int i_norm = static_cast<int>((0.7 - config.x_start) / (config.x_end - config.x_start) * Nx) + 1;
+        std::cout << "    nx = " << norm_x.u_h(i_norm, j_test, k_test) << "\n";
+        std::cout << "    ny = " << norm_y.u_h(i_norm, j_test, k_test) << "\n";
+        std::cout << "    nz = " << norm_z.u_h(i_norm, j_test, k_test) << "\n";
+
+        // Test 9: CalculateConvection
+        std::cout << "\nTest 9: CalculateConvection\n";
+        Face psi_f(&grid, "psi_face");
+        Field convection(&grid, "convection");
+        CalculateFaceVals(phi, psi_f);
+        CalculateConvection(psi_f, vel_f, convection);
+        convection.download();
+        std::cout << "  Convection term at test point: " << convection.u_h(i_test, j_test, k_test) << "\n";
+
+        // Test 10: CalculateDiffusion
+        std::cout << "\nTest 10: CalculateDiffusion\n";
+        Field diffusion(&grid, "diffusion");
+        CalculateDiffusion(psi_f, phi_diff, diffusion);
+        diffusion.download();
+        std::cout << "  Diffusion term at test point: " << diffusion.u_h(i_test, j_test, k_test) << "\n";
+
+        // Test 11: CalculateSharpening
+        std::cout << "\nTest 11: CalculateSharpening\n";
+        Face norm_f(&grid, "norm_face");
+        Field sharpening(&grid, "sharpening");
+        CalculateFaceVals(norm_x, norm_y, norm_z, norm_f);
+        CalculateSharpening(psi_f, norm_f, phi_diff, sharpening);
+        sharpening.download();
+        std::cout << "  Sharpening term at test point: " << sharpening.u_h(i_test, j_test, k_test) << "\n";
+
+        // Test 12: SDF conversion functions
+        std::cout << "\nTest 12: SDF conversions\n";
+        Field sdf(&grid, "sdf");
+        Field phase(&grid, "phase");
+        Field epsilon(&grid, "epsilon");
+        sdf.fill(0.1);
+        epsilon.fill(0.03);
+        sdf.upload();
+        epsilon.upload();
+        CalculateSDF2Phase(sdf, epsilon, phase);
+        phase.download();
+        std::cout << "  SDF=0.1, epsilon=0.03 -> phase = " << phase.u_h(Nx / 2, Ny / 2, 1) << " (should be ~1.0)\n";
+
+        CalculatePhaseToSdf(phase, epsilon, sdf);
+        sdf.download();
+        std::cout << "  phase -> SDF = " << sdf.u_h(Nx / 2, Ny / 2, 1) << " (should recover ~0.1)\n";
+
+        // Test 13: CalculateAbsoluteValue (scalar)
+        std::cout << "\nTest 13: CalculateAbsoluteValue (scalar)\n";
+        Field neg_field(&grid, "negative");
+        Field abs_field(&grid, "absolute");
+        neg_field.fill(-5.0);
+        neg_field.upload();
+        CalculateAbsoluteValue(neg_field, abs_field);
+        abs_field.download();
+        std::cout << "  Input: -5.0, Output: " << abs_field.u_h(i_test, j_test, k_test) << " (should be 5.0)\n";
+
+        // Test 14: CalculateAbsoluteValue (vector)
+        std::cout << "\nTest 14: CalculateAbsoluteValue (vector)\n";
+        Field mag_field(&grid, "magnitude");
+        vx.fill(3.0);
+        vy.fill(4.0);
+        vz.fill(0.0);
+        vx.upload();
+        vy.upload();
+        vz.upload();
+        CalculateAbsoluteValue(vx, vy, vz, mag_field);
+        mag_field.download();
+        std::cout << "  Input: (3, 4, 0), Magnitude: " << mag_field.u_h(i_test, j_test, k_test) << " (should be 5.0)\n";
+
+        // Test 15: CalculateMaxMagnitude
+        std::cout << "\nTest 15: CalculateMaxMagnitude\n";
+        real_t max_val;
+        CalculateMaxMagnitude(mag_field, max_val);
+        std::cout << "  Maximum magnitude in field: " << max_val << " (should be 5.0)\n";
+
+        // Test 16: CalculateBoundaryValues
+        std::cout << "\nTest 16: CalculateBoundaryValues\n";
+        Field bc_field(&grid, "bc_test");
+        bc_field.fill(1.0);
+        bc_field.upload();
+
+        BC.W = 2;
+        BC.E = 2; // Periodic
+        BC.S = 2;
+        BC.N = 2;
+        BC.B = 2;
+        BC.F = 2;
+        BC.W_val = 0.0;
+        BC.E_val = 0.0;
+        BC.S_val = 0.0;
+        BC.N_val = 0.0;
+        BC.B_val = 0.0;
+        BC.F_val = 0.0;
+
+        CalculateBoundaryValues(bc_field, BC);
+        bc_field.download();
+        std::cout << "  Boundary conditions applied (periodic)\n";
+        std::cout << "  Ghost cell value: " << bc_field.u_h(0, j_test, k_test) << "\n";
+
+        std::cout << "\n=== All Calculator Tests Complete ===\n";
+    }
+    Kokkos::finalize();
+
+    return 0;
+}
+
+================================================================================
+File: ./test_simple.cpp
+================================================================================
+
+// file: src/test_simple.cpp
+#include "INCLUDE/include.hpp"
+#include "CALCULATORS/calculators.hpp"
+#include <iostream>
+#include <iomanip>
+
+int main(int argc, char* argv[])
+{
+    Kokkos::initialize(argc, argv);
+    {
+        std::cout << "=== Simple CalculateFaceVals Test ===\n\n";
+
+        // Create a small test grid
+        gridconfig config;
+        config.Ngl = 2;
+        config.Nx = 8;
+        config.Ny = 8;
+        config.Nz = 8;
+        config.x_start = 0.0;
+        config.x_end = 1.0;
+        config.y_start = 0.0;
+        config.y_end = 1.0;
+        config.z_start = 0.0;
+        config.z_end = 1.0;
+        config.x_option = GRID_UNIFORM;
+        config.y_option = GRID_UNIFORM;
+        config.z_option = GRID_UNIFORM;
+        
+        GridInfo grid(config);
+        
+        std::cout << "Grid created: " << config.Nx << "x" << config.Ny << "x" << config.Nz << "\n";
+        std::cout << "Ghost layers: " << config.Ngl << "\n\n";
+
+        // Test: CalculateFaceVals (scalar)
+        std::cout << "Test: CalculateFaceVals (scalar field)\n";
+        Field phi(&grid, "phi");
+        Face phi_f(&grid, "phi_face");
+        
+        // Initialize phi to a constant value on host
+        std::cout << "Initializing phi to 5.0...\n";
+        for (int i = 1 - config.Ngl; i <= config.Nx + config.Ngl; i++) {
+            for (int j = 1 - config.Ngl; j <= config.Ny + config.Ngl; j++) {
+                for (int k = 1 - config.Ngl; k <= config.Nz + config.Ngl; k++) {
+                    phi.u_h(i, j, k) = 5.0;
+                }
+            }
+        }
+        
+        // Upload to device
+        phi.upload();
+        std::cout << "Uploaded to device\n";
+        
+        // Call CalculateFaceVals
+        std::cout << "Calling CalculateFaceVals...\n";
+        CalculateFaceVals(phi, phi_f);
+        std::cout << "CalculateFaceVals completed\n";
+        
+        // Download results
+        phi_f.download();
+        std::cout << "Downloaded results\n\n";
+        
+        // Check results at center
+        int ic = config.Nx / 2;
+        int jc = config.Ny / 2;
+        int kc = config.Nz / 2;
+        
+        std::cout << "Results at center (" << ic << "," << jc << "," << kc << "):\n";
+        std::cout << "  Input phi = " << phi.u_h(ic, jc, kc) << "\n";
+        std::cout << "  East face (phi_f.E)  = " << phi_f.E.u_h(ic, jc, kc) << " (expected: 5.0)\n";
+        std::cout << "  West face (phi_f.W)  = " << phi_f.W.u_h(ic, jc, kc) << " (expected: 5.0)\n";
+        std::cout << "  North face (phi_f.N) = " << phi_f.N.u_h(ic, jc, kc) << " (expected: 5.0)\n";
+        std::cout << "  South face (phi_f.S) = " << phi_f.S.u_h(ic, jc, kc) << " (expected: 5.0)\n";
+#ifndef USE_2D
+        std::cout << "  Front face (phi_f.F) = " << phi_f.F.u_h(ic, jc, kc) << " (expected: 5.0)\n";
+        std::cout << "  Back face (phi_f.B)  = " << phi_f.B.u_h(ic, jc, kc) << " (expected: 5.0)\n";
+#endif
+        
+        // Check a few more locations
+        std::cout << "\nResults at i=1, j=1, k=1:\n";
+        std::cout << "  Input phi = " << phi.u_h(1, 1, 1) << "\n";
+        std::cout << "  East face  = " << phi_f.E.u_h(1, 1, 1) << "\n";
+        std::cout << "  West face  = " << phi_f.W.u_h(1, 1, 1) << "\n";
+        std::cout << "  North face = " << phi_f.N.u_h(1, 1, 1) << "\n";
+        std::cout << "  South face = " << phi_f.S.u_h(1, 1, 1) << "\n";
+        
+        // Test with a gradient field
+        std::cout << "\n=== Test with linear field phi = x ===\n";
+        auto xc = grid.xgrid->c_h;
+        for (int i = 1 - config.Ngl; i <= config.Nx + config.Ngl; i++) {
+            for (int j = 1 - config.Ngl; j <= config.Ny + config.Ngl; j++) {
+                for (int k = 1 - config.Ngl; k <= config.Nz + config.Ngl; k++) {
+                    phi.u_h(i, j, k) = xc(i);
+                }
+            }
+        }
+        
+        phi.upload();
+        CalculateFaceVals(phi, phi_f);
+        phi_f.download();
+        
+        std::cout << "Results at center (" << ic << "," << jc << "," << kc << "):\n";
+        std::cout << "  Input phi(i) = " << phi.u_h(ic, jc, kc) << " (x = " << xc(ic) << ")\n";
+        std::cout << "  Input phi(i+1) = " << phi.u_h(ic+1, jc, kc) << " (x = " << xc(ic+1) << ")\n";
+        std::cout << "  East face = " << phi_f.E.u_h(ic, jc, kc) << " (expected: avg of above)\n";
+        
+        real_t expected_E = 0.5 * (phi.u_h(ic, jc, kc) + phi.u_h(ic+1, jc, kc));
+        std::cout << "  Expected East face = " << expected_E << "\n";
+        std::cout << "  Error = " << (phi_f.E.u_h(ic, jc, kc) - expected_E) << "\n";
+        
+        std::cout << "\n=== Test Complete ===\n";
+    }
+    Kokkos::finalize();
+    
+    return 0;
+}

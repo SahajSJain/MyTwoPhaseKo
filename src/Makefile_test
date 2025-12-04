@@ -1,0 +1,145 @@
+# Makefile_test for Phase Field Kokkos calculator tests
+
+# Compiler - Intel icpx
+CXX = g++
+
+# Include directories
+INCLUDES = -I. -I/usr/include
+
+# Library directories
+LIB_DIRS = -L/usr/lib/x86_64-linux-gnu
+
+# Libraries - order matters!
+LIBS = -lkokkoscore -lkokkoscontainers -ldl -lpthread
+
+# Compiler flags for Intel icpx
+CXXFLAGS = -O3 -std=c++20 -fopenmp
+CXXFLAGS += -Wall -Wextra
+CXXFLAGS +=  -g 
+CXXFLAGS += -DUSE_DOUBLE
+
+# Linker flags
+LDFLAGS = $(LIB_DIRS) $(LIBS) 
+
+# Source files - replace main.cpp with test.cpp
+SRCS = test.cpp \
+       INCLUDE/phasefield.cpp \
+       INCLUDE/face.cpp \
+       INCLUDE/field.cpp \
+       CALCULATORS/face_interpolate.cpp \
+       CALCULATORS/face_diff.cpp \
+       CALCULATORS/gradient.cpp \
+       CALCULATORS/divergence.cpp \
+       CALCULATORS/normals.cpp \
+       CALCULATORS/convection.cpp \
+       CALCULATORS/diffusion.cpp \
+       CALCULATORS/sharpening.cpp \
+       CALCULATORS/boundary_conditions.cpp \
+       CALCULATORS/sdf2phase.cpp \
+       CALCULATORS/phase2sdf.cpp \
+       CALCULATORS/absolute_value.cpp \
+       CALCULATORS/max_magnitude.cpp
+
+# Object files
+OBJS = $(SRCS:.cpp=.o)
+
+# Separate object files for 2D and 3D
+OBJS2D = $(SRCS:.cpp=_2d.o)
+OBJS3D = $(SRCS:.cpp=_3d.o)
+
+# Executable names
+TARGET_2D = test2d
+TARGET_3D = test3d
+
+# Default target - build both
+all: $(TARGET_2D) $(TARGET_3D)
+
+# Build 2D version
+$(TARGET_2D): $(OBJS2D)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Built 2D test version: $(TARGET_2D)"
+
+# Build 3D version
+$(TARGET_3D): $(OBJS3D)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Built 3D test version: $(TARGET_3D)"
+
+# Pattern rule for 2D object files
+%_2d.o: %.cpp
+	$(CXX) $(CXXFLAGS) -DUSE_2D $(INCLUDES) -c $< -o $@
+
+# Pattern rule for 3D object files
+%_3d.o: %.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Clean build files
+clean:
+	rm -f $(OBJS2D) $(OBJS3D) $(TARGET_2D) $(TARGET_3D)
+	rm -f *.optrpt
+	rm -rf TECOUT test*.o INCLUDE/test*.o CALCULATORS/test*.o
+
+# Clean and rebuild
+rebuild: clean all
+
+# Run 2D test
+run2d: $(TARGET_2D)
+	@echo "Running 2D calculator tests..."
+	./$(TARGET_2D)
+
+# Run 3D test
+run3d: $(TARGET_3D)
+	@echo "Running 3D calculator tests..."
+	./$(TARGET_3D)
+
+# Debug build with additional Intel debugging options
+debug: CXXFLAGS += -g -O0 -DDEBUG
+debug: CXXFLAGS += -check=uninit -fp-stack-check
+debug: CXXFLAGS += -ftrapuv  # Initialize uninitialized variables
+debug: clean all
+
+# Single precision build
+single: CXXFLAGS := $(filter-out -DUSE_DOUBLE,$(CXXFLAGS))
+single: clean all
+
+# Show configuration
+info:
+	@echo "Compiler: $(CXX)"
+	@echo "Flags: $(CXXFLAGS)"
+	@echo "Includes: $(INCLUDES)"
+	@echo "Libraries: $(LDFLAGS)"
+	@echo "Source files: $(SRCS)"
+	@echo "Targets: $(TARGET_2D) $(TARGET_3D)"
+
+# Help
+help:
+	@echo "Available targets:"
+	@echo "  make -f Makefile_test          - Build both 2D and 3D test versions"
+	@echo "  make -f Makefile_test run2d    - Build and run 2D tests"
+	@echo "  make -f Makefile_test run3d    - Build and run 3D tests"
+	@echo "  make -f Makefile_test clean    - Remove test build files"
+	@echo "  make -f Makefile_test rebuild  - Clean and rebuild both test versions"
+	@echo "  make -f Makefile_test debug    - Build with debug flags"
+	@echo "  make -f Makefile_test single   - Build with single precision"
+	@echo "  make -f Makefile_test info     - Show build configuration"
+	@echo "  make -f Makefile_test help     - Show this help message"
+
+# Dependencies
+test.o: test.cpp INCLUDE/include.hpp CALCULATORS/calculators.hpp
+phasefield.o: INCLUDE/phasefield.cpp INCLUDE/phasefield.hpp CALCULATORS/calculators.hpp
+face.o: INCLUDE/face.cpp INCLUDE/face.hpp
+field.o: INCLUDE/field.cpp INCLUDE/field.hpp
+face_interpolate.o: CALCULATORS/face_interpolate.cpp CALCULATORS/calculators.hpp
+face_diff.o: CALCULATORS/face_diff.cpp CALCULATORS/calculators.hpp
+gradient.o: CALCULATORS/gradient.cpp CALCULATORS/calculators.hpp
+divergence.o: CALCULATORS/divergence.cpp CALCULATORS/calculators.hpp
+convection.o: CALCULATORS/convection.cpp CALCULATORS/calculators.hpp
+normals.o: CALCULATORS/normals.cpp CALCULATORS/calculators.hpp
+diffusion.o: CALCULATORS/diffusion.cpp CALCULATORS/calculators.hpp
+sharpening.o: CALCULATORS/sharpening.cpp CALCULATORS/calculators.hpp
+boundary_conditions.o: CALCULATORS/boundary_conditions.cpp CALCULATORS/calculators.hpp
+sdf2phase.o: CALCULATORS/sdf2phase.cpp CALCULATORS/calculators.hpp
+phase2sdf.o: CALCULATORS/phase2sdf.cpp CALCULATORS/calculators.hpp
+absolute_value.o: CALCULATORS/absolute_value.cpp CALCULATORS/calculators.hpp
+max_magnitude.o: CALCULATORS/max_magnitude.cpp CALCULATORS/calculators.hpp
+
+.PHONY: all run2d run3d clean rebuild debug single info help

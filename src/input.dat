@@ -1,0 +1,28 @@
+===============================================================================
+-------------------- GRID CONFIGURATION ------------------------------------
+Nx       Ny      Nz      Ngl
+128     128     128      1
+xmode           xstart        xend
+0               0.               1.
+ymode           ystart        yend
+0               0.               1.
+zmode           zstart        zend
+0               0.               1.
+--------------------- Solver Config --------------------------------------------
+dt          nstart       nend       nprint     ndump
+0.001       0            4000       25         25
+-------------------- FIELD INITIALIZATION ----------------------------------
+x0          y0          z0         radius      mode
+0.75        0.5         0.0        0.10        0
+-------------------- Phase Field Solver ---------------------------------------------
+epsilon_fac        gamma_fac
+1.0                1.0
+--------------------- Boundary conditions -----------------------------------------
+bc_east     valbc_east
+1           0.0
+bc_west     valbc_west
+1           0.0
+bc_north    valbc_north
+1           0.0
+bc_south    valbc_south
+1           0.0

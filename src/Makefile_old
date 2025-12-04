@@ -1,0 +1,146 @@
+# Makefile for Phase Field Kokkos project
+
+# Compiler - Intel icpx
+CXX = g++
+
+# Include directories
+INCLUDES = -I. -I/usr/include
+
+# Library directories
+LIB_DIRS = -L/usr/lib/x86_64-linux-gnu
+
+# Libraries - order matters!
+LIBS = -lkokkoscore -lkokkoscontainers -ldl -lpthread
+
+# Compiler flags for Intel icpx
+CXXFLAGS = -O3 -std=c++20 -fopenmp
+CXXFLAGS += -Wall -Wextra
+CXXFLAGS +=  -g 
+CXXFLAGS += -DUSE_DOUBLE
+
+# Linker flags
+LDFLAGS = $(LIB_DIRS) $(LIBS) 
+
+# Source files
+SRCS = main.cpp \
+       INCLUDE/phasefield.cpp \
+       INCLUDE/face.cpp \
+       INCLUDE/field.cpp \
+       CALCULATORS/face_interpolate.cpp \
+       CALCULATORS/face_diff.cpp \
+       CALCULATORS/gradient.cpp \
+       CALCULATORS/divergence.cpp \
+       CALCULATORS/normals.cpp \
+       CALCULATORS/convection.cpp \
+       CALCULATORS/diffusion.cpp \
+       CALCULATORS/sharpening.cpp \
+       CALCULATORS/boundary_conditions.cpp \
+       CALCULATORS/sdf2phase.cpp \
+       CALCULATORS/phase2sdf.cpp \
+       CALCULATORS/absolute_value.cpp \
+       CALCULATORS/max_magnitude.cpp
+
+# Object files
+OBJS = $(SRCS:.cpp=.o)
+
+# Separate object files for 2D and 3D
+OBJS2D = $(SRCS:.cpp=_2d.o)
+OBJS3D = $(SRCS:.cpp=_3d.o)
+
+# Executable names
+TARGET_2D = phasefield2d
+TARGET_3D = phasefield3d
+
+# Default target - build both
+all: $(TARGET_2D) $(TARGET_3D)
+
+# Build 2D version
+$(TARGET_2D): $(OBJS2D)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Built 2D version: $(TARGET_2D)"
+
+# Build 3D version
+$(TARGET_3D): $(OBJS3D)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Built 3D version: $(TARGET_3D)"
+
+# Pattern rule for 2D object files
+%_2d.o: %.cpp
+	$(CXX) $(CXXFLAGS) -DUSE_2D $(INCLUDES) -c $< -o $@
+
+# Pattern rule for 3D object files
+%_3d.o: %.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Clean build files
+clean:
+	rm -f $(OBJS2D) $(OBJS3D) $(TARGET_2D) $(TARGET_3D)
+	rm -f *.optrpt
+	rm -rf TECOUT  **/*.o **/*.tmp
+
+# Clean and rebuild
+rebuild: clean all
+
+# Debug build with additional Intel debugging options
+debug: CXXFLAGS += -g -O0 -DDEBUG
+debug: CXXFLAGS += -check=uninit -fp-stack-check
+debug: CXXFLAGS += -ftrapuv  # Initialize uninitialized variables
+debug: clean all
+
+# Single precision build
+single: CXXFLAGS := $(filter-out -DUSE_DOUBLE,$(CXXFLAGS))
+single: clean all
+
+# Intel-specific optimized build
+intel-opt: CXXFLAGS = -O3 -xHost -qopenmp -ipo -no-prec-div -fp-model fast=2
+intel-opt: CXXFLAGS += -std=c++20 -traceback -DUSE_DOUBLE
+intel-opt: clean all
+
+# Show configuration
+info:
+	@echo "Compiler: $(CXX)"
+	@echo "Flags: $(CXXFLAGS)"
+	@echo "Kokkos path: $(KOKKOS_PATH)"
+	@echo "Includes: $(INCLUDES)"
+	@echo "Libraries: $(LDFLAGS)"
+	@echo "Source files: $(SRCS)"
+	@echo "Targets: $(TARGET_2D) $(TARGET_3D)"
+
+# Help
+help:
+	@echo "Available targets:"
+	@echo "  make          - Build both 2D and 3D versions"
+	@echo "  make 2d       - Build only 2D version"
+	@echo "  make 3d       - Build only 3D version"
+	@echo "  make run2d    - Build and run 2D version"
+	@echo "  make run3d    - Build and run 3D version"
+	@echo "  make run2d-4  - Build and run 2D with 4 OpenMP threads"
+	@echo "  make run3d-4  - Build and run 3D with 4 OpenMP threads"
+	@echo "  make clean    - Remove build files and output"
+	@echo "  make rebuild  - Clean and rebuild both versions"
+	@echo "  make debug    - Build with debug flags"
+	@echo "  make single   - Build with single precision"
+	@echo "  make intel-opt - Build with aggressive Intel optimizations"
+	@echo "  make info     - Show build configuration"
+	@echo "  make help     - Show this help message"
+
+# Dependencies
+main.o: main.cpp INCLUDE/phasefield.hpp INCLUDE/inputreader.hpp
+phasefield.o: INCLUDE/phasefield.cpp INCLUDE/phasefield.hpp CALCULATORS/calculators.hpp
+face.o: INCLUDE/face.cpp INCLUDE/face.hpp
+field.o: INCLUDE/field.cpp INCLUDE/field.hpp
+face_interpolate.o: CALCULATORS/face_interpolate.cpp CALCULATORS/calculators.hpp
+face_diff.o: CALCULATORS/face_diff.cpp CALCULATORS/calculators.hpp
+gradient.o: CALCULATORS/gradient.cpp CALCULATORS/calculators.hpp
+divergence.o: CALCULATORS/divergence.cpp CALCULATORS/calculators.hpp
+convection.o: CALCULATORS/convection.cpp CALCULATORS/calculators.hpp
+normals.o: CALCULATORS/normals.cpp CALCULATORS/calculators.hpp
+diffusion.o: CALCULATORS/diffusion.cpp CALCULATORS/calculators.hpp
+sharpening.o: CALCULATORS/sharpening.cpp CALCULATORS/calculators.hpp
+boundary_conditions.o: CALCULATORS/boundary_conditions.cpp CALCULATORS/calculators.hpp
+sdf2phase.o: CALCULATORS/sdf2phase.cpp CALCULATORS/calculators.hpp
+phase2sdf.o: CALCULATORS/phase2sdf.cpp CALCULATORS/calculators.hpp
+absolute_value.o: CALCULATORS/absolute_value.cpp CALCULATORS/calculators.hpp
+max_magnitude.o: CALCULATORS/max_magnitude.cpp CALCULATORS/calculators.hpp
+
+.PHONY: all 2d 3d run2d run3d run2d-4 run3d-4 clean rebuild debug single intel-opt info help
