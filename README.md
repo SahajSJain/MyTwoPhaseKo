@@ -1,6 +1,12 @@
 # Phase Field Simulation Code
 
-A high-performance phase field simulation code for modeling solidification processes using Kokkos for GPU/CPU portability.
+A high-performance phase field simulation code for modeling two phase flows with Kokkos. Based on 
+```
+Suhas S. Jain,
+Accurate conservative phase-field method for simulation of two-phase flows,
+Journal of Computational Physics, Volume 469, 2022, 111529, ISSN 0021-9991,
+https://doi.org/10.1016/j.jcp.2022.111529.
+```
 
 ## Features
 
