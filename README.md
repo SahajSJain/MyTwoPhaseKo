@@ -18,6 +18,7 @@ https://doi.org/10.1016/j.jcp.2022.111529.
   
 ## Future Plans 
  Full Navier Stokes solution. We pretty much have everything we need in calculators. 
+ Implement an RK4 based timestepping procedure.
 
 ## Requirements
 
@@ -53,6 +54,9 @@ Run the simulation:
 
 Results are written to the `TECOUT/` directory in Tecplot ASCII format:
 - `phase.0000000.dat`, `phase.0000001.dat`, etc.
+## Animation: 
+Droplet in a shear flow, grid size: 500 x 500: 
+![til](./Disk_Shear_Flow.gif)
 
 ## Features
 
@@ -100,6 +104,3 @@ Run the simulation:
 Results are written to the `TECOUT/` directory in Tecplot ASCII format:
 - `phase.0000000.dat`, `phase.0000001.dat`, etc.
 
-## License
-
-[Add your license here]
