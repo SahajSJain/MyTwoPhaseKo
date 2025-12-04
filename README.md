@@ -13,7 +13,6 @@ https://doi.org/10.1016/j.jcp.2022.111529.
 - **2D/3D simulations** of phase field models for solidification
 - **Flexible boundary conditions**: Dirichlet, Neumann, and Periodic
 - **Configurable grid**: Uniform and non-uniform mesh support
-- **Multiple numerical schemes** for spatial discretization
 - **Automatic output** to Tecplot format for visualization
   
 ## Future Plans 
