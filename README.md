@@ -18,7 +18,8 @@ https://doi.org/10.1016/j.jcp.2022.111529.
   
 ## Future Plans 
  Full Navier Stokes solution. We pretty much have everything we need in calculators. 
- Implement an RK4 based timestepping procedure.
+ Implement an RK4 based timestepping procedure. 
+ Test with CUDA (not done yet)
 
 ## Requirements
 
